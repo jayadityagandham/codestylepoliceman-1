@@ -1,0 +1,16 @@
+{
+  "/api/auth/me/route": "app/api/auth/me/route.js",
+  "/api/workspaces/route": "app/api/workspaces/route.js",
+  "/favicon.ico/route": "app/favicon.ico/route.js",
+  "/api/workspaces/[workspaceId]/route": "app/api/workspaces/[workspaceId]/route.js",
+  "/api/workspaces/[workspaceId]/dashboard/route": "app/api/workspaces/[workspaceId]/dashboard/route.js",
+  "/api/workspaces/[workspaceId]/repo/route": "app/api/workspaces/[workspaceId]/repo/route.js",
+  "/api/workspaces/[workspaceId]/collaborators/route": "app/api/workspaces/[workspaceId]/collaborators/route.js",
+  "/api/workspaces/[workspaceId]/invite/route": "app/api/workspaces/[workspaceId]/invite/route.js",
+  "/api/workspaces/invite/join/route": "app/api/workspaces/invite/join/route.js",
+  "/api/workspaces/[workspaceId]/messages/route": "app/api/workspaces/[workspaceId]/messages/route.js",
+  "/page": "app/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/dashboard/[workspaceId]/page": "app/dashboard/[workspaceId]/page.js",
+  "/invite/[token]/page": "app/invite/[token]/page.js"
+}

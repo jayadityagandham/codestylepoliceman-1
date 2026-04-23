@@ -75,7 +75,43 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ wor
       return NextResponse.json({ error: 'AI could not analyze commits. Please try again.' }, { status: 422 })
     }
 
-    return NextResponse.json(result)
+    // Sync task status from commit-task analysis
+    const todoById = new Map((todos ?? []).map((t) => [t.id, t]))
+    const todoByTitle = new Map((todos ?? []).map((t) => [t.title.trim().toLowerCase(), t]))
+    const statusFromAnalysis: Record<'addressed' | 'partially-addressed' | 'not-addressed', 'completed' | 'in-progress' | null> = {
+      addressed: 'completed',
+      'partially-addressed': 'in-progress',
+      'not-addressed': null,
+    }
+
+    let syncedTasksCount = 0
+
+    for (const tp of result.taskProgress ?? []) {
+      const mappedStatus = statusFromAnalysis[tp.status]
+      if (!mappedStatus) continue
+
+      const byId = todoById.get(tp.taskId)
+      const byTitle = todoByTitle.get(tp.taskTitle.trim().toLowerCase())
+      const target = byId ?? byTitle
+      if (!target) continue
+      if (target.status === mappedStatus) continue
+
+      syncedTasksCount++
+      const payload: { status: string; completed_at?: string | null } = { status: mappedStatus }
+      if (mappedStatus === 'completed') payload.completed_at = new Date().toISOString()
+      else payload.completed_at = null
+
+      await db
+        .from('workspace_todos')
+        .update(payload)
+        .eq('id', target.id)
+        .eq('workspace_id', workspaceId)
+    }
+
+    return NextResponse.json({
+      ...result,
+      syncedTasksCount,
+    })
   } catch (err) {
     if (err instanceof GeminiRateLimitError) {
       return NextResponse.json(

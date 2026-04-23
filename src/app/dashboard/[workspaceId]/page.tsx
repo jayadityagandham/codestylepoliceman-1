@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Switch } from '@/components/ui/switch'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
@@ -65,8 +66,17 @@ function HealthGauge({ score }: { score: number }) {
       <div className={`relative size-32 rounded-full shadow-lg ${bgGlow}`}>
         <svg viewBox="0 0 100 100" className="size-full -rotate-90">
           <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeWidth="5" className="text-muted/15" />
-          <circle cx="50" cy="50" r="40" fill="none" stroke={color} strokeWidth="5"
-            strokeDasharray={`${(score / 100) * 251.2} 251.2`} strokeLinecap="round" className="transition-all duration-1000" />
+          <circle
+            cx="50"
+            cy="50"
+            r="40"
+            fill="none"
+            stroke={color}
+            strokeWidth="5"
+            strokeDasharray={`${(score / 100) * 251.2} 251.2`}
+            strokeLinecap="round"
+            className="transition-all duration-1000"
+          />
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span className="text-3xl font-extrabold text-foreground tracking-tight">{score}</span>
@@ -98,7 +108,7 @@ function StatCard({ icon: Icon, label, value, sub }: {
 // Force-directed graph component using canvas rendering (no external dep needed for simple version)
 function ForceGraph({ nodes, links }: {
   nodes: Array<{ id: string; label: string; concentration: number; busFactor: number; val: number }>
-  links: Array<{ source: string; target: string }>
+  links: Array<{ source: string; target: string; strength?: number }>
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -116,15 +126,22 @@ function ForceGraph({ nodes, links }: {
     if (!ctx) return
     ctx.scale(2, 2)
 
-    // Initialize positions randomly
+    // Initialize positions in a loose ring so graphs feel structured immediately
     const pos = new Map<string, { x: number; y: number; vx: number; vy: number }>()
-    nodes.forEach((n) => {
-      pos.set(n.id, { x: w / 2 + (Math.random() - 0.5) * w * 0.6, y: h / 2 + (Math.random() - 0.5) * h * 0.6, vx: 0, vy: 0 })
+    nodes.forEach((n, i) => {
+      const angle = (i / Math.max(1, nodes.length)) * Math.PI * 2
+      const radius = Math.min(w, h) * 0.24
+      pos.set(n.id, {
+        x: w / 2 + Math.cos(angle) * radius + (Math.random() - 0.5) * 20,
+        y: h / 2 + Math.sin(angle) * radius + (Math.random() - 0.5) * 20,
+        vx: 0,
+        vy: 0,
+      })
     })
 
-    // Simple force simulation
+    // Smooth force simulation with more settling frames for cleaner layout
     let frame = 0
-    const maxFrames = 120
+    const maxFrames = 200
     const animate = () => {
       if (frame > maxFrames) return
       frame++
@@ -138,7 +155,7 @@ function ForceGraph({ nodes, links }: {
           const dx = b.x - a.x
           const dy = b.y - a.y
           const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy))
-          const force = 800 / (dist * dist)
+          const force = 950 / (dist * dist)
           a.vx -= (dx / dist) * force
           a.vy -= (dy / dist) * force
           b.vx += (dx / dist) * force
@@ -154,7 +171,8 @@ function ForceGraph({ nodes, links }: {
         const dx = b.x - a.x
         const dy = b.y - a.y
         const dist = Math.sqrt(dx * dx + dy * dy)
-        const force = (dist - 80) * 0.02
+        const restLength = 90 - ((l.strength ?? 0.8) * 22)
+        const force = (dist - restLength) * 0.02 * (l.strength ?? 1)
         a.vx += (dx / dist) * force
         a.vy += (dy / dist) * force
         b.vx -= (dx / dist) * force
@@ -171,47 +189,62 @@ function ForceGraph({ nodes, links }: {
       // Update positions
       nodes.forEach((n) => {
         const p = pos.get(n.id)!
-        p.vx *= 0.8
-        p.vy *= 0.8
+        p.vx *= 0.82
+        p.vy *= 0.82
         p.x += p.vx
         p.y += p.vy
-        p.x = Math.max(30, Math.min(w - 30, p.x))
-        p.y = Math.max(30, Math.min(h - 30, p.y))
+        p.x = Math.max(34, Math.min(w - 34, p.x))
+        p.y = Math.max(34, Math.min(h - 34, p.y))
       })
 
-      // Draw links
-      ctx.strokeStyle = 'rgba(148,163,184,0.2)'
-      ctx.lineWidth = 1
-      links.forEach((l) => {
+      // Draw curved links with dynamic emphasis by link strength
+      links.forEach((l, i) => {
         const a = pos.get(l.source)
         const b = pos.get(l.target)
         if (!a || !b) return
+        const dx = b.x - a.x
+        const dy = b.y - a.y
+        const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy))
+        const nx = -dy / dist
+        const ny = dx / dist
+        const curve = (8 + (i % 3) * 5) * (i % 2 === 0 ? 1 : -1)
+        const cx = (a.x + b.x) / 2 + nx * curve
+        const cy = (a.y + b.y) / 2 + ny * curve
+
+        ctx.strokeStyle = `rgba(99,102,241,${0.12 + (l.strength ?? 0.7) * 0.22})`
+        ctx.lineWidth = 0.8 + (l.strength ?? 0.7) * 1.2
         ctx.beginPath()
         ctx.moveTo(a.x, a.y)
-        ctx.lineTo(b.x, b.y)
+        ctx.quadraticCurveTo(cx, cy, b.x, b.y)
         ctx.stroke()
       })
 
-      // Draw nodes
+      // Draw nodes with glow, ring, and higher contrast labels
       nodes.forEach((n) => {
         const p = pos.get(n.id)!
-        const r = 6 + n.val * 0.1
+        const r = Math.max(11, Math.min(20, 10 + n.val * 0.16))
         const color = n.concentration > 90 ? '#f87171' : n.concentration > 75 ? '#facc15' : '#4ade80'
+
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, r + 7, 0, Math.PI * 2)
+        ctx.fillStyle = color + '18'
+        ctx.fill()
+
         ctx.beginPath()
         ctx.arc(p.x, p.y, r, 0, Math.PI * 2)
-        ctx.fillStyle = color + '33'
+        ctx.fillStyle = color + '30'
         ctx.fill()
         ctx.strokeStyle = color
-        ctx.lineWidth = 1.5
+        ctx.lineWidth = 2
         ctx.stroke()
 
-        // Label
-        ctx.fillStyle = '#e2e8f0'
-        ctx.font = '9px sans-serif'
+        // Label and concentration
+        ctx.fillStyle = '#334155'
+        ctx.font = '600 10px sans-serif'
         ctx.textAlign = 'center'
-        ctx.fillText(n.label, p.x, p.y + r + 12)
+        ctx.fillText(n.label, p.x, p.y + r + 14)
         ctx.fillStyle = color
-        ctx.font = 'bold 8px sans-serif'
+        ctx.font = '700 9px sans-serif'
         ctx.fillText(`${n.concentration}%`, p.x, p.y + 3)
       })
 
@@ -241,9 +274,10 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [prsPage, setPrsPage] = useState(0)
   const [issuesPage, setIssuesPage] = useState(0)
   const [msgSearch, setMsgSearch] = useState('')
+  const [msgViewFilter, setMsgViewFilter] = useState<'all' | 'blockers' | 'keywords' | 'questions'>('all')
   const [msgInput, setMsgInput] = useState('')
   const [sendingMsg, setSendingMsg] = useState(false)
-  const [realtimeMessages, setRealtimeMessages] = useState<Array<{ id: string; source: string; channel_name: string; author_username: string; content: string; sent_at: string; intent: string | null; entities: Record<string, unknown> | null }>>([])
+  const [realtimeMessages, setRealtimeMessages] = useState<Array<{ id: string; source: string; channel_name: string; author_username: string; content: string; sent_at: string; intent: string | null; entities: Record<string, unknown> | null; is_blocker?: boolean | null }>>([])
   const pendingOptimisticIds = useRef<Set<string>>(new Set())
   const [, setTick] = useState(0)
   const PAGE_SIZE = 10
@@ -300,6 +334,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
             sent_at: row.sent_at as string,
             intent: (row.intent as string) ?? null,
             entities: (row.entities as Record<string, unknown>) ?? null,
+            is_blocker: (row.is_blocker as boolean | null) ?? false,
           }
           setRealtimeMessages((prev) => {
             // If this exact id already exists, skip
@@ -409,6 +444,9 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [heuristicsLoading, setHeuristicsLoading] = useState(false)
   const [resolvingAlertId, setResolvingAlertId] = useState<string | null>(null)
   const [inviteLoading, setInviteLoading] = useState(false)
+  const [loadingInsights, setLoadingInsights] = useState(false)
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
+  const [inviteCopied, setInviteCopied] = useState(false)
   const [collabRefreshing, setCollabRefreshing] = useState(false)
   const [unbindLoading, setUnbindLoading] = useState(false)
   const [collabInfo, setCollabInfo] = useState<{ external_contributors: { total: number; collaborators: number; external: string[] }; author_mapping: { mapped_count: number; unmapped_authors: string[] } } | null>(null)
@@ -435,7 +473,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [aiAnalysis, setAiAnalysis] = useState<{ summary: string; risks: string[]; suggestions: string[]; teamDynamics: string; nextSteps: string[] } | null>(null)
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
   const [aiRetryCountdown, setAiRetryCountdown] = useState(0)
-  const [commitSummary, setCommitSummary] = useState<{ summary: string; highlights: string[]; authorBreakdown: Record<string, string>; taskProgress: Array<{ taskId: string; taskTitle: string; status: 'addressed' | 'partially-addressed' | 'not-addressed'; evidence: string }>; completionPercent: number; workInsight: string } | null>(null)
+  const [commitSummary, setCommitSummary] = useState<{ summary: string; highlights: string[]; authorBreakdown: Record<string, string>; taskProgress: Array<{ taskId: string; taskTitle: string; status: 'addressed' | 'partially-addressed' | 'not-addressed'; evidence: string }>; completionPercent: number; workInsight: string; syncedTasksCount?: number } | null>(null)
   const [commitSummarizing, setCommitSummarizing] = useState(false)
   const [commitFilter, setCommitFilter] = useState<string>('all')
 
@@ -445,12 +483,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   // Fetch todos when insights tab is active
   useEffect(() => {
     if (tab !== 'insights' || !token) return
-    setTodosLoading(true)
-    fetch(`/api/workspaces/${workspaceId}/todos`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.json())
-      .then((d) => setTodos(d.todos ?? []))
-      .catch(() => toast.error('Failed to load tasks'))
-      .finally(() => setTodosLoading(false))
+    fetchTodos()
   }, [tab, token, workspaceId])
 
   useEffect(() => {
@@ -498,10 +531,137 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
         body: JSON.stringify({ role: 'member', expires_hours: 48 }),
       })
       const data = await res.json()
-      if (res.ok) { setInviteUrl(data.invite_url); toast.success('Invite link generated (48h)') }
+      if (res.ok) {
+        setInviteUrl(data.invite_url)
+        setInviteCopied(false)
+        toast.success('Invite link generated (48h)')
+      }
       else toast.error(data.error)
     } catch { toast.error('Failed to generate invite') }
     finally { setInviteLoading(false) }
+  }
+
+  const copyInviteLink = async () => {
+    if (!inviteUrl) return
+    try {
+      await navigator.clipboard.writeText(inviteUrl)
+      setInviteCopied(true)
+      toast.success('Link copied to clipboard!')
+      setTimeout(() => setInviteCopied(false), 1800)
+    } catch {
+      toast.error('Failed to copy link')
+    }
+  }
+
+  const fetchTodos = async () => {
+    if (!token) return
+    setTodosLoading(true)
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/todos`, { headers: { Authorization: `Bearer ${token}` } })
+      const d = await res.json()
+      if (res.ok) setTodos(d.todos ?? [])
+      else toast.error(d.error || 'Failed to load tasks')
+    } catch {
+      toast.error('Failed to load tasks')
+    } finally {
+      setTodosLoading(false)
+    }
+  }
+
+  const generateAiTasks = async () => {
+    if (!token || aiGenerating || !aiProjectDesc.trim()) return
+    setAiGenerating(true)
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/todos/generate`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectDescription: aiProjectDesc.trim(), existingTodos: todos.map((t) => t.title) }),
+      })
+      const d = await res.json()
+      if (res.ok) {
+        toast.success(`Generated ${d.count ?? d.todos?.length ?? 0} task(s)`)
+        setAiProjectDesc('')
+        fetchTodos()
+      } else {
+        toast.error(d.error || 'Failed to generate tasks')
+      }
+    } catch {
+      toast.error('Failed to generate tasks')
+    } finally {
+      setAiGenerating(false)
+    }
+  }
+
+  const addTodo = async () => {
+    if (!token || addingTodo || !newTodoTitle.trim()) return
+    setAddingTodo(true)
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/todos`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newTodoTitle.trim(),
+          description: newTodoDesc.trim() || null,
+          priority: newTodoPriority,
+          deadline: newTodoDeadline || null,
+        }),
+      })
+      const d = await res.json()
+      if (res.ok) {
+        toast.success('Task created')
+        setNewTodoTitle('')
+        setNewTodoDesc('')
+        setNewTodoPriority('medium')
+        setNewTodoDeadline('')
+        setShowAddTodo(false)
+        fetchTodos()
+      } else {
+        toast.error(d.error || 'Failed to create task')
+      }
+    } catch {
+      toast.error('Failed to create task')
+    } finally {
+      setAddingTodo(false)
+    }
+  }
+
+  const updateTodoStatus = async (id: string, status: 'pending' | 'in-progress' | 'completed') => {
+    if (!token) return
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/todos`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status }),
+      })
+      const d = await res.json()
+      if (res.ok) {
+        setTodos((prev) => prev.map((t) => (t.id === id ? d.todo : t)))
+      } else {
+        toast.error(d.error || 'Failed to update task')
+      }
+    } catch {
+      toast.error('Failed to update task')
+    }
+  }
+
+  const removeTodo = async (id: string) => {
+    if (!token) return
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/todos`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      if (res.ok) {
+        setTodos((prev) => prev.filter((t) => t.id !== id))
+        toast.success('Task removed')
+      } else {
+        const d = await res.json()
+        toast.error(d.error || 'Failed to remove task')
+      }
+    } catch {
+      toast.error('Failed to remove task')
+    }
   }
 
   const resolveAlert = async (alertId: string) => {
@@ -661,480 +821,599 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
     return `${h}h`
   }
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-background/80 backdrop-blur-md sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <button onClick={() => router.push('/dashboard')} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
-              <Shield className="size-4 text-foreground" />
-              <span className="text-xs font-semibold hidden sm:block">CSP</span>
-            </button>
-            <ChevronRight className="size-3.5 text-muted-foreground/50" />
-            <span className="text-xs font-semibold text-foreground tracking-tight">{wsInfo?.name ?? '...'}</span>
-            {data?.overview && (
-              <Badge variant={data.overview.healthScore >= 75 ? 'secondary' : 'outline'} className={`text-[10px] ml-1 px-2 ${
-                data.overview.healthScore >= 75 ? 'text-foreground/70' :
-                data.overview.healthScore >= 50 ? 'text-foreground/60' :
-                'text-foreground/50'
-              }`}>
-                Health: {data.overview.healthScore}
-              </Badge>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon-sm" onClick={runHeuristics} disabled={heuristicsLoading} className="rounded-lg hover:bg-muted transition-colors">
-                  {heuristicsLoading ? <div className="size-4 border-2 border-foreground border-t-transparent rounded-full animate-spin" /> : <Zap className="size-4" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Run heuristic checks</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon-sm" onClick={refetch} disabled={loading} className="rounded-lg hover:bg-muted transition-colors">
-                  <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Refresh data</TooltipContent>
-            </Tooltip>
-            <Separator orientation="vertical" className="h-5 mx-1.5" />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="p-1 rounded-full hover:bg-muted/80 transition-all duration-200 outline-none">
-                  <Avatar className="size-7 ring-1 ring-border">
-                    {user?.avatar_url && <AvatarImage src={user.avatar_url} />}
-                    <AvatarFallback className="text-xs font-medium bg-muted text-foreground">{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
-                  </Avatar>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52 p-1.5">
-                <div className="px-2.5 py-2.5">
-                  <p className="text-sm font-semibold text-foreground truncate">{user?.name}</p>
-                  <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
-                </div>
-                <Separator className="my-1" />
-                <DropdownMenuItem onClick={() => setTab('settings')} className="rounded-md">
-                  <Users className="size-3.5" /> Profile & Settings
-                </DropdownMenuItem>
-                <DropdownMenuItem variant="destructive" onClick={() => { logout(); router.push('/') }} className="rounded-md">
-                  <LogOut className="size-3.5" /> Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-      </header>
+  const clampPercent = (n: number) => Math.max(0, Math.min(100, Math.round(n)))
 
-      {/* Tabs */}
-      <div className="border-b border-border bg-background/80 backdrop-blur-md sticky top-14 z-30">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="flex justify-center gap-1 overflow-x-auto -mb-px">
-            {tabs.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => setTab(id)}
-                className={`flex items-center gap-2 px-4 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
-                  tab === id ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Icon className="size-3.5" />
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
+  const recentCommits7d = data
+    ? data.recentCommits.filter((c) => new Date(c.committed_at).getTime() > Date.now() - 7 * 86400000).length
+    : 0
+  const totalPRsForRate = data ? data.pullRequests.length : 0
+  const closedOrMergedPRsForRate = data ? data.pullRequests.filter((pr) => pr.state !== 'open').length : 0
+  const totalIssuesForRate = data ? data.issues.length : 0
+  const resolvedIssuesForRate = data ? data.issues.filter((i) => i.state !== 'open').length : 0
+  const fallbackCommitVelocity = clampPercent((recentCommits7d / 14) * 100)
+  const fallbackPrThroughput = totalPRsForRate === 0 ? 0 : clampPercent((closedOrMergedPRsForRate / totalPRsForRate) * 100)
+  const fallbackIssueResolution = totalIssuesForRate === 0 ? 0 : clampPercent((resolvedIssuesForRate / totalIssuesForRate) * 100)
+  const fallbackActivitySpread = !data ? 0 : data.contributors.length >= 4 ? 100 : data.contributors.length >= 3 ? 80 : data.contributors.length >= 2 ? 60 : data.contributors.length >= 1 ? 30 : 0
+  const contributorHealthRows = data?.contributorHealth ?? []
+  const activeContributors = contributorHealthRows.filter((h) => h.status === 'active').length
+  const moderateContributors = contributorHealthRows.filter((h) => h.status === 'moderate').length
+  const inactiveContributors = contributorHealthRows.filter((h) => h.status === 'inactive').length
+  const fallbackContributorHealth = contributorHealthRows.length === 0 ? 0 : clampPercent(((activeContributors + moderateContributors) / contributorHealthRows.length) * 100)
+  const alertsLoadPercent = clampPercent((data?.alerts.length ?? 0) * 10)
+  const wipLoadPercent = clampPercent((data?.overview.totalWIP ?? 0) * 12.5)
+  const individualContributorActivity = contributorHealthRows
+    .slice()
+    .sort((a, b) => a.hours_since_last_commit - b.hours_since_last_commit)
+    .slice(0, 4)
+  const healthBreakdown = {
+    commitVelocity: {
+      score: data?.overview.healthBreakdown?.commitVelocity?.score ?? fallbackCommitVelocity,
+      detail: data?.overview.healthBreakdown?.commitVelocity?.detail ?? `${recentCommits7d} commits in last 7d`,
+    },
+    prThroughput: {
+      score: data?.overview.healthBreakdown?.prThroughput?.score ?? fallbackPrThroughput,
+      detail: data?.overview.healthBreakdown?.prThroughput?.detail ?? (totalPRsForRate === 0 ? 'No PRs yet' : `${closedOrMergedPRsForRate}/${totalPRsForRate} PRs closed/merged`),
+    },
+    issueResolution: {
+      score: data?.overview.healthBreakdown?.issueResolution?.score ?? fallbackIssueResolution,
+      detail: data?.overview.healthBreakdown?.issueResolution?.detail ?? (totalIssuesForRate === 0 ? 'No issues yet' : `${resolvedIssuesForRate}/${totalIssuesForRate} issues resolved`),
+    },
+    activitySpread: {
+      score: data?.overview.healthBreakdown?.activitySpread?.score ?? fallbackActivitySpread,
+      detail: data?.overview.healthBreakdown?.activitySpread?.detail ?? `${data?.contributors.length ?? 0} contributors`,
+    },
+    healthDiversity: {
+      score: data?.overview.healthBreakdown?.healthDiversity?.score ?? fallbackContributorHealth,
+      detail: data?.overview.healthBreakdown?.healthDiversity?.detail ?? (contributorHealthRows.length === 0 ? 'No contributor health data yet' : `${activeContributors + moderateContributors}/${contributorHealthRows.length} active or moderate`),
+    },
+  }
+
+  const getEntityStringList = (entities: Record<string, unknown> | null | undefined, key: string) => {
+    const value = entities?.[key]
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : []
+  }
+
+  const getNerStringList = (entities: Record<string, unknown> | null | undefined, key: string) => {
+    const ner = entities?.ner
+    if (!ner || typeof ner !== 'object') return []
+    const value = (ner as Record<string, unknown>)[key]
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : []
+  }
+
+  const isBlockerMessage = (msg: { intent: string | null; entities: Record<string, unknown> | null; is_blocker?: boolean | null }) => {
+    const entityBlocker = Boolean(msg.entities?.isBlocker)
+    return Boolean(msg.is_blocker) || entityBlocker || msg.intent === 'blocker'
+  }
+
+  const messageKeywords = (msg: { entities: Record<string, unknown> | null }) => {
+    const techTerms = getEntityStringList(msg.entities, 'techTerms')
+    const issueRefs = getNerStringList(msg.entities, 'issueRefs')
+    return [...new Set([...techTerms, ...issueRefs])]
+  }
+
+  const blockerMessagesCount = realtimeMessages.filter((msg) => isBlockerMessage(msg)).length
+  const keywordMessagesCount = realtimeMessages.filter((msg) => messageKeywords(msg).length > 0).length
+
+  const filteredMessages = realtimeMessages
+    .filter((msg) => {
+      if (msgViewFilter === 'blockers') return isBlockerMessage(msg)
+      if (msgViewFilter === 'keywords') return messageKeywords(msg).length > 0
+      if (msgViewFilter === 'questions') return msg.intent === 'question' || msg.content.includes('?')
+      return true
+    })
+    .filter((msg) => {
+      if (!msgSearch) return true
+      const q = msgSearch.toLowerCase()
+      return msg.content.toLowerCase().includes(q)
+        || msg.author_username.toLowerCase().includes(q)
+        || (msg.channel_name ?? '').toLowerCase().includes(q)
+    })
+
+  const getContributorAvatar = (username: string | null | undefined) => {
+    if (!username || !data) return null
+    const fromContributors = data.contributors.find((c) => c.username === username)?.avatar_url
+    if (fromContributors) return fromContributors
+    const fromTeamStats = data.teamStats?.find((m) => m.username === username)?.avatar_url ?? null
+    if (fromTeamStats) return fromTeamStats
+    const fromMembers = data.members.find((m) => m.user?.github_username === username)?.user?.avatar_url ?? null
+    return fromMembers
+  }
+
+  const renderContributorIdentity = (
+    username: string | null | undefined,
+    options?: { avatarSizeClass?: string; textClassName?: string }
+  ) => {
+    const safeName = username ?? 'unknown'
+    const avatar = getContributorAvatar(safeName)
+    return (
+      <div className="flex items-center gap-2 min-w-0">
+        <Avatar className={options?.avatarSizeClass ?? 'size-5'}>
+          {avatar ? <AvatarImage src={avatar} /> : null}
+          <AvatarFallback className="text-[9px] bg-primary/20 text-primary">{safeName.charAt(0).toUpperCase()}</AvatarFallback>
+        </Avatar>
+        <span className={options?.textClassName ?? 'text-xs font-medium text-foreground truncate'}>{safeName}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex h-screen w-full bg-[#f4f5f8] text-slate-900 overflow-hidden font-sans relative">
+      
+      {/* Decorative Background */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute top-[-10%] left-[-5%] w-[40%] h-[40%] bg-pink-200/20 rounded-full blur-[100px]" />
+        <div className="absolute top-[-10%] right-[-5%] w-[40%] h-[40%] bg-emerald-200/20 rounded-full blur-[100px]" />
       </div>
 
-      <main ref={dashboardRef} className="max-w-7xl mx-auto px-6 py-8">
+      {/* Premium Sidebar */}
+      <aside className="w-[280px] bg-white border-r border-slate-100 flex flex-col shrink-0 h-full overflow-hidden relative z-20 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
+        <div className="p-8 pb-5 shrink-0">
+          <div className="flex items-center gap-3.5 cursor-pointer" onClick={() => router.push('/dashboard')}>
+            <div className="size-11 rounded-2xl bg-slate-900 text-white flex items-center justify-center shadow-[0_8px_16px_rgba(15,23,42,0.2)]">
+              <Shield className="size-5" />
+            </div>
+            <div>
+              <h2 className="font-display font-bold text-lg leading-tight tracking-tight text-slate-900">Code<br/>Policeman</h2>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto px-8 pb-6">
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-4 px-4">Menu</p>
+            <div className="space-y-1.5">
+              {tabs.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => setTab(id)}
+                  className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl text-[14px] font-bold transition-all duration-200 ${
+                    tab === id 
+                      ? 'bg-slate-900 text-white shadow-[0_8px_16px_rgba(15,23,42,0.15)]' 
+                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                  }`}
+                >
+                  <div className="flex items-center gap-3.5">
+                    <Icon className={`size-4.5 ${tab === id ? 'text-white' : 'text-slate-400'}`} />
+                    {label}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-slate-100 shrink-0">
+          <div className="flex items-center gap-3">
+            <Avatar className="size-11 ring-2 ring-slate-100">
+              {user?.avatar_url && <AvatarImage src={user.avatar_url} />}
+              <AvatarFallback className="bg-pink-100 text-pink-600 text-sm font-bold">{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
+            </Avatar>
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-bold text-slate-900 truncate">{user?.name}</p>
+              <p className="text-[11px] text-slate-500 truncate">{user?.email}</p>
+            </div>
+            <button onClick={logout} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors">
+              <LogOut className="size-4" />
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden relative z-10 bg-[#f4f5f8]">
+        {/* Top Navbar */}
+        <header className="h-24 pr-10 pl-8 flex items-center justify-between shrink-0 pt-4">
+          <div className="flex items-center gap-2">
+            <div className="flex flex-col justify-center">
+              <h1 className="text-3xl font-display font-bold text-slate-900 tracking-tight leading-none mb-1 flex items-center gap-3">
+                {wsInfo?.name ?? 'Loading...'}
+                {data?.overview && (
+                  <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wider ${
+                    data.overview.healthScore >= 75 ? 'bg-emerald-100 text-emerald-700' :
+                    data.overview.healthScore >= 50 ? 'bg-yellow-100 text-yellow-700' :
+                    'bg-red-100 text-red-700'
+                  }`}>
+                    {data.overview.healthScore >= 75 ? 'Pro' : 'Risk'}
+                  </span>
+                )}
+              </h1>
+              <p className="text-[12px] font-semibold text-slate-500">Workspace Dashboard</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="relative hidden md:block">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
+              <Input placeholder="Search here..." className="w-72 pl-11 h-11 bg-white border-transparent shadow-[0_2px_8px_rgba(0,0,0,0.04)] rounded-full focus-visible:ring-2 focus-visible:ring-slate-200 text-[13px] font-bold text-slate-900 placeholder:text-slate-400" />
+            </div>
+            <div className="flex items-center gap-2 ml-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={runHeuristics} disabled={heuristicsLoading} className="rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-transparent hover:bg-slate-50 size-11">
+                    {heuristicsLoading ? <Loader2 className="size-4 animate-spin text-slate-500" /> : <Zap className="size-4.5 text-slate-600" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Run heuristics</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={refetch} disabled={loading} className="rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-transparent hover:bg-slate-50 size-11">
+                    <RefreshCw className={`size-4.5 text-slate-600 ${loading ? 'animate-spin' : ''}`} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Refresh</TooltipContent>
+              </Tooltip>
+            </div>
+            <Button onClick={() => setInviteDialogOpen(true)} className="rounded-full bg-slate-900 hover:bg-slate-800 text-white shadow-[0_8px_16px_rgba(15,23,42,0.2)] px-6 h-11 ml-2 font-bold text-[13px]">
+              <UserMinus className="size-4 mr-2" /> Invite
+            </Button>
+          </div>
+        </header>
+
+        {/* Scrollable Content */}
+        <main ref={dashboardRef} className="flex-1 overflow-y-auto px-8 pb-12 pt-6">
 
         {/* OVERVIEW TAB */}
         {tab === 'overview' && data && (
-          <div className="space-y-6">
-            {/* Live data badge */}
-            {data.liveSource && (
-              <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
-                <span className="size-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                Live data from GitHub
+          <div className="space-y-8 animate-in fade-in duration-500 max-w-7xl mx-auto py-2">
+            
+            {/* Header Section */}
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+              <div>
+                <h2 className="text-[28px] font-display font-bold text-slate-900 tracking-tight">Overview</h2>
+                <p className="text-[13px] text-slate-500 mt-1 font-medium">Uncompromising Performance Metrics & Code Health</p>
               </div>
-            )}
-            {/* Stat cards row */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-              <StatCard icon={GitCommit} label="Total Commits" value={data.overview.totalCommits} sub="all time" />
-              <StatCard icon={GitPullRequest} label="Open PRs" value={data.overview.openPRs}
-                sub="awaiting review" />
-              <StatCard icon={AlertCircle} label="Open Issues" value={data.overview.openIssues}
-                sub="in backlog" />
-              <StatCard icon={Clock} label="Avg Cycle Time" value={formatSeconds(data.overview.avgCycleTimeSeconds)}
-                sub="commit to merge" />
-              <StatCard icon={Activity} label="WIP Count" value={data.overview.totalWIP ?? 0}
-                sub="active PRs (updated <7d)" />
+              <div className="flex items-center gap-3 bg-white p-1 rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+                <button className="px-5 py-2 text-[13px] font-bold rounded-full bg-slate-900 text-white shadow-md">All Time</button>
+                <button className="px-5 py-2 text-[13px] font-bold rounded-full text-slate-500 hover:text-slate-900 transition-colors">Last 7 Days</button>
+                <button className="px-5 py-2 text-[13px] font-bold rounded-full text-slate-500 hover:text-slate-900 transition-colors">Last 30 Days</button>
+              </div>
             </div>
 
-            {/* Health score + health history */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <Card className="py-0 shadow-sm border-border/50 flex flex-col items-center justify-center">
-                <CardContent className="py-6">
-                  <p className="text-xs text-muted-foreground font-medium text-center mb-4">Team Health Score</p>
-                  <HealthGauge score={data.overview.healthScore} />
-                </CardContent>
-              </Card>
-              <Card className="lg:col-span-2 py-0 shadow-sm border-border/50">
-                <CardContent className="py-5">
-                  <p className="text-xs text-muted-foreground font-medium mb-4">Health Score Breakdown</p>
-                {data.overview.healthBreakdown ? (
-                  <div className="space-y-3">
-                    {Object.entries(data.overview.healthBreakdown as Record<string, { score: number; weight: number; detail: string }>).map(([key, v]) => {
-                      const labels: Record<string, string> = {
-                        commitVelocity: 'Commit Velocity',
-                        prThroughput: 'PR Throughput',
-                        issueResolution: 'Issue Resolution',
-                        activitySpread: 'Activity Spread',
-                        healthDiversity: 'Contributor Health',
-                      }
-                      const barColor = v.score >= 70 ? 'bg-emerald-500' : v.score >= 40 ? 'bg-yellow-500' : 'bg-red-500'
-                      return (
-                        <div key={key}>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-medium text-foreground">{labels[key] ?? key}</span>
-                            <span className="text-xs text-muted-foreground">{v.score}/100 ({Math.round(v.weight * 100)}%)</span>
-                          </div>
-                          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${v.score}%` }} />
-                          </div>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{v.detail}</p>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : data.healthHistory.length > 0 ? (
-                  <div className="h-[120px]">
-                    <ChartLine
-                      data={{
-                        labels: [...data.healthHistory].reverse().map((h) => new Date(h.snapshot_at).toLocaleDateString()),
-                        datasets: [{
-                          label: 'Health',
-                          data: [...data.healthHistory].reverse().map((h) => h.score),
-                          borderColor: '#a3a3a3',
-                          backgroundColor: 'rgba(163,163,163,0.1)',
-                          fill: true,
-                          tension: 0.4,
-                          pointRadius: 0,
-                          borderWidth: 2,
-                        }],
-                      }}
-                      options={{
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: { legend: { display: false } },
-                        scales: {
-                          x: { display: false },
-                          y: { display: false, min: 0, max: 100 },
-                        },
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div className="h-30 flex items-center justify-center text-xs text-muted-foreground">No data yet. Bind a GitHub repo to see health breakdown.</div>
-                )}
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Contributor activity + Recent alerts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card className="py-0 shadow-sm border-border/50">
-                <CardContent className="p-5">
-                <p className="text-xs text-muted-foreground font-medium mb-4 flex items-center gap-1.5">
-                  <Users className="size-3.5" /> Contributor Activity
-                </p>
-                {data.contributors.length === 0 ? (
-                  <p className="text-xs text-muted-foreground text-center py-8">No commits yet. Connect your GitHub repo and add a webhook.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {data.contributors.slice(0, 6).map((c) => (
-                      <div key={c.username} className="flex items-center gap-3">
-                        {c.avatar_url ? (
-                          <img src={c.avatar_url} alt="" className="w-7 h-7 rounded-full shrink-0" />
-                        ) : (
-                          <div className="w-7 h-7 bg-primary/20 rounded-full flex items-center justify-center shrink-0">
-                            <span className="text-xs font-bold text-primary">{c.username.charAt(0).toUpperCase()}</span>
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-medium text-foreground truncate">{c.username}</span>
-                            <span className="text-xs text-muted-foreground shrink-0 ml-2">{c.commits} commits</span>
-                          </div>
-                          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div className="h-full bg-foreground/60 rounded-full transition-all" style={{ width: `${Math.min(100, (c.commits / Math.max(1, data.contributors[0].commits)) * 100)}%` }} />
-                          </div>
-                        </div>
+            {/* Teams Section */}
+            <div>
+              <h3 className="text-lg font-bold text-slate-900 mb-4 px-1">Teams & Activity</h3>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                {/* Main Large Card */}
+                <Card className="lg:col-span-2 border-0 shadow-[0_8px_30px_rgba(0,0,0,0.04)] rounded-[2rem] overflow-hidden bg-white p-2">
+                  <CardContent className="p-6">
+                    <div className="flex items-start justify-between mb-8">
+                      <div>
+                        <h4 className="text-4xl font-display font-bold text-slate-900 tracking-tight">
+                          {data.overview.totalCommits.toLocaleString()}
+                        </h4>
+                        <p className="text-[12px] text-slate-400 font-semibold mt-1">Total Commits Over Time</p>
                       </div>
-                    ))}
-                  </div>
-                )}
-                </CardContent>
-              </Card>
-
-              <Card className="py-0 shadow-sm border-border/50">
-                <CardContent className="p-5">
-                <p className="text-xs text-muted-foreground font-medium mb-4 flex items-center gap-1.5">
-                  <Bell className="size-3.5" /> Active Alerts
-                </p>
-                {data.alerts.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-8 gap-2">
-                    <CheckCircle className="w-6 h-6 text-muted-foreground" />
-                    <p className="text-xs text-muted-foreground">All clear! No active alerts.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {data.alerts.slice(0, 4).map((alert) => {
-                      const cfg = SEVERITY_CONFIG[alert.severity as keyof typeof SEVERITY_CONFIG] ?? SEVERITY_CONFIG.info
-                      const Icon = cfg.icon
-                      return (
-                        <div key={alert.id} className={`flex items-start gap-2 p-3 rounded-lg border text-xs ${cfg.bg}`}>
-                          <Icon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${cfg.color}`} />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-foreground truncate">{alert.title}</p>
-                            <p className="text-muted-foreground mt-0.5 truncate">{formatDistanceToNow(new Date(alert.created_at), { addSuffix: true })}</p>
-                          </div>
-                        </div>
-                      )
-                    })}
-                    {data.alerts.length > 4 && (
-                      <Button variant="link" size="sm" className="px-0 h-auto text-xs" onClick={() => setTab('alerts')}>
-                        View all {data.alerts.length} alerts
-                      </Button>
-                    )}
-                  </div>
-                )}
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Contributor Health */}
-            {data.contributorHealth && data.contributorHealth.length > 0 && (
-              <Card className="py-0 shadow-sm border-border/50">
-                <CardContent className="p-5">
-                <p className="text-xs text-muted-foreground font-medium mb-4 flex items-center gap-1.5">
-                  <Activity className="size-3.5" /> Contributor Health
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {data.contributorHealth.map((h) => {
-                    const statusConfig = {
-                      active: { emoji: '🟢', label: 'Active', color: 'text-emerald-400', border: 'border-emerald-400/30' },
-                      moderate: { emoji: '🟡', label: 'Moderate', color: 'text-yellow-400', border: 'border-yellow-400/30' },
-                      inactive: { emoji: '🔴', label: 'Inactive', color: 'text-red-400', border: 'border-red-400/30' },
-                    }[h.status]
-                    return (
-                      <div key={h.author} className={`flex items-center gap-3 p-3 rounded-lg border ${statusConfig.border} bg-card`}>
-                        {h.avatar_url ? (
-                          <img src={h.avatar_url} alt="" className="w-8 h-8 rounded-full shrink-0" />
-                        ) : (
-                          <div className="w-8 h-8 bg-primary/20 rounded-full flex items-center justify-center shrink-0">
-                            <span className="text-xs font-bold text-primary">{h.author.charAt(0).toUpperCase()}</span>
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-foreground truncate">{h.author}</div>
-                          <div className="text-xs text-muted-foreground">
-                            Last commit: {formatDistanceToNow(new Date(h.last_commit), { addSuffix: true })}
-                          </div>
-                        </div>
-                        <span className={`text-xs font-medium ${statusConfig.color} whitespace-nowrap`}>
-                          {statusConfig.emoji} {statusConfig.label}
-                        </span>
+                      <div className="flex items-center gap-2 text-emerald-500 bg-emerald-50 px-3 py-1.5 rounded-full">
+                        <TrendingUp className="size-3.5" />
+                        <span className="text-[12px] font-bold">{data.overview.healthScore}% Health</span>
                       </div>
-                    )
-                  })}
-                </div>
-              </CardContent>
-              </Card>
-            )}
+                    </div>
 
-            {/* Commit type breakdown */}
-            {data.recentCommits.length > 0 && (
-              <Card className="py-0 shadow-sm border-border/50">
-              <CardContent className="p-5">
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4 flex items-center gap-1.5">
-                  <BarChart2 className="w-3.5 h-3.5" /> Commit Type Breakdown
-                </p>
-                {(() => {
-                  const typeCounts: Record<string, number> = {}
-                  data.recentCommits.forEach((c) => { typeCounts[c.commit_type ?? 'chore'] = (typeCounts[c.commit_type ?? 'chore'] || 0) + 1 })
-                  const sorted = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])
-                  const typeColorMap: Record<string, string> = {
-                    feat: '#34d399', fix: '#f87171', refactor: '#a78bfa', docs: '#60a5fa',
-                    test: '#22d3ee', chore: '#a1a1aa', style: '#f472b6', perf: '#fb923c',
-                    ci: '#facc15', security: '#ef4444', deploy: '#818cf8', other: '#6b7280',
-                  }
-                  const total = data.recentCommits.length
-                  return (
+                    {/* Gradient Bar (Time Tracking Equivalent) */}
+                    <div className="flex items-center gap-4 mb-8 bg-slate-50 p-2.5 rounded-2xl border border-slate-100">
+                      <div className="text-[12px] font-bold text-slate-700 px-2 whitespace-nowrap">Commit Velocity</div>
+                       <div className="flex-1 h-4 rounded-full bg-slate-100 shadow-inner relative overflow-hidden">
+                         <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-pink-400 via-orange-400 to-emerald-400 rounded-full transition-all duration-700" style={{ width: `${healthBreakdown.commitVelocity.score}%` }} />
+                      </div>
+                       <div className="text-[12px] font-bold text-slate-900 px-2 whitespace-nowrap">{healthBreakdown.commitVelocity.score}%</div>
+                    </div>
+
+                    {/* Trends Over Time Chart */}
                     <div>
-                      <div className="h-[180px]">
-                        <ChartBar
-                          data={{
-                            labels: sorted.map(([t]) => t),
-                            datasets: [{
-                              label: 'Commits',
-                              data: sorted.map(([, c]) => c),
-                              backgroundColor: sorted.map(([t]) => (typeColorMap[t] ?? '#6b7280') + 'cc'),
-                              borderColor: sorted.map(([t]) => typeColorMap[t] ?? '#6b7280'),
-                              borderWidth: 1.5,
-                              borderRadius: 6,
-                              maxBarThickness: 36,
-                            }],
-                          }}
-                          options={{
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                              legend: { display: false },
-                              tooltip: {
-                                callbacks: {
-                                  label: ((ctx: { parsed: { y: number } }) => `${ctx.parsed.y} commit${ctx.parsed.y !== 1 ? 's' : ''} (${Math.round((ctx.parsed.y / total) * 100)}%)`) as never,
-                                },
-                              },
-                            },
-                            scales: {
-                              x: { grid: { display: false }, ticks: { color: 'hsl(var(--muted-foreground))', font: { size: 11, weight: 500 } } },
-                              y: { grid: { color: 'hsl(var(--border))' }, ticks: { color: 'hsl(var(--muted-foreground))', font: { size: 10 }, stepSize: 1 } },
-                            },
-                          }}
-                        />
+                      <h5 className="text-[15px] font-bold text-slate-900 mb-4">Trends Over Time</h5>
+                      <div className="h-[200px]">
+                        {data.healthHistory.length > 0 ? (
+                          <ChartBar
+                            data={{
+                              labels: [...data.healthHistory].reverse().map((h) => new Date(h.snapshot_at).toLocaleDateString()),
+                              datasets: [{
+                                label: 'Health Score',
+                                data: [...data.healthHistory].reverse().map((h) => h.score),
+                                backgroundColor: 'rgba(52, 211, 153, 0.4)', // emerald-400 with opacity
+                                hoverBackgroundColor: 'rgba(52, 211, 153, 0.8)',
+                                borderRadius: 4,
+                                barPercentage: 0.6,
+                              }]
+                            }}
+                            options={{
+                              responsive: true,
+                              maintainAspectRatio: false,
+                              plugins: { legend: { display: false } },
+                              scales: {
+                                x: { grid: { display: false }, ticks: { font: { size: 10, weight: 600 }, color: '#94a3b8' } },
+                                y: { display: false }
+                              }
+                            }}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                            <Activity className="size-8 mb-2 opacity-20" />
+                            <span className="text-[12px] font-semibold">No trend data available</span>
+                          </div>
+                        )}
                       </div>
-                      {/* Legend */}
-                      <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3 pt-3 border-t border-border">
-                        {sorted.map(([type, count]) => (
-                          <div key={type} className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: typeColorMap[type] ?? '#6b7280' }} />
-                            <span className="text-[10px] text-muted-foreground">
-                              <span className="font-medium text-foreground">{type}</span> — {count} ({Math.round((count / total) * 100)}%)
-                            </span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Best Performing Employees Card */}
+                <Card className="border-0 shadow-[0_8px_30px_rgba(0,0,0,0.04)] rounded-[2rem] overflow-hidden bg-white p-2">
+                  <CardContent className="p-6">
+                    <h4 className="text-[15px] font-bold text-slate-900 mb-6">Top Contributors</h4>
+                    {data.contributors.length === 0 ? (
+                      <p className="text-[12px] text-slate-400 text-center py-8">No contributors yet.</p>
+                    ) : (
+                      <div className="space-y-5">
+                        {data.contributors.slice(0, 6).map((c, i) => (
+                          <div key={c.username} className="flex items-center gap-3">
+                            <div className="relative">
+                              {c.avatar_url ? (
+                                <img src={c.avatar_url} alt="" className="w-10 h-10 rounded-full shadow-sm" />
+                              ) : (
+                                <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center shadow-sm">
+                                  <span className="text-[14px] font-bold text-slate-600">{c.username.charAt(0).toUpperCase()}</span>
+                                </div>
+                              )}
+                              {i < 3 && (
+                                <div className={`absolute -bottom-1 -right-1 size-4 rounded-full flex items-center justify-center text-[9px] font-bold text-white shadow-sm ${i === 0 ? 'bg-yellow-400' : i === 1 ? 'bg-slate-300' : 'bg-orange-400'}`}>
+                                  {i + 1}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[13px] font-bold text-slate-900 truncate">{c.username}</p>
+                              <p className="text-[11px] text-slate-400 truncate">{c.commits} commits</p>
+                            </div>
+                            <div className="flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-lg">
+                              <span className="text-yellow-400 text-[10px]">★</span>
+                              <span className="text-[11px] font-bold text-slate-700">{Math.min(5.0, (c.commits / Math.max(1, data.contributors[0].commits)) * 5).toFixed(1)}</span>
+                            </div>
                           </div>
                         ))}
                       </div>
-                    </div>
-                  )
-                })()}
-                </CardContent>
-              </Card>
-            )}
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
 
-            {/* Lifecycle Timeline */}
-            <Card className="py-0 shadow-sm border-border/50">
-              <CardContent className="p-5">
-              <p className="text-xs text-muted-foreground font-medium mb-4 flex items-center gap-1.5">
-                <TrendingUp className="size-3.5" /> Lifecycle Timeline (Recent PRs)
-              </p>
-              {data.pullRequests.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-6">No pull requests tracked yet.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <div className="min-w-125 space-y-2">
-                    {data.pullRequests.slice(0, 8).map((pr) => {
-                      const opened = new Date(pr.opened_at).getTime()
-                      const merged = pr.merged_at ? new Date(pr.merged_at).getTime() : Date.now()
-                      const duration = Math.max(1, Math.floor((merged - opened) / 3600000))
-                      const maxDur = 72
-                      const pct = Math.min(100, (duration / maxDur) * 100)
-                      return (
-                        <div key={pr.id} className="flex items-center gap-3">
-                          <span className="text-xs text-muted-foreground w-16 shrink-0">PR #{pr.github_pr_number}</span>
-                          <div className="flex-1 h-5 bg-muted rounded relative overflow-hidden">
-                            <div
-                              className={`h-full rounded transition-all ${pr.merged_at ? 'bg-emerald-500/60' : 'bg-primary/60'}`}
-                              style={{ width: `${pct}%` }}
-                            />
-                            <span className="absolute inset-0 flex items-center px-2 text-[10px] text-foreground/80 truncate">{pr.title}</span>
+            {/* Metrics Section */}
+            <div>
+              <h3 className="text-lg font-bold text-slate-900 mb-4 px-1">Metrics</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+                <Card className="border-0 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-[1.5rem] bg-white">
+                  <CardContent className="p-5 flex flex-col h-full justify-between gap-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[13px] font-bold text-slate-700">Total Commits</p>
+                      <div className="p-1.5 bg-slate-50 rounded-xl text-slate-600"><GitCommit className="size-4" /></div>
+                    </div>
+                    <div>
+                      <span className="text-3xl font-display font-bold text-slate-900">{data.overview.totalCommits.toLocaleString()}</span>
+                      <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">Webhook Ingested</p>
+                    </div>
+                  </CardContent>
+                </Card>
+                
+                <Card className="border-0 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-[1.5rem] bg-white">
+                  <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[13px] font-bold text-slate-700">Open Pull Requests</p>
+                      <div className="p-1.5 bg-blue-50 rounded-xl text-blue-500"><GitPullRequest className="size-4" /></div>
+                    </div>
+                    <div>
+                      <div className="flex items-end gap-2">
+                        <span className="text-3xl font-display font-bold text-slate-900">{data.overview.openPRs}</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">Active PRs</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-400 rounded-full" style={{ width: `${healthBreakdown.prThroughput.score}%` }} />
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-500">{healthBreakdown.prThroughput.score}%</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-[1.5rem] bg-white">
+                  <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[13px] font-bold text-slate-700">Open Issues</p>
+                      <div className="p-1.5 bg-red-50 rounded-xl text-red-500"><AlertCircle className="size-4" /></div>
+                    </div>
+                    <div>
+                      <div className="flex items-end gap-2">
+                        <span className="text-3xl font-display font-bold text-slate-900">{data.overview.openIssues}</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">Backlog Items</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-red-400 rounded-full" style={{ width: `${healthBreakdown.issueResolution.score}%` }} />
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-500">{healthBreakdown.issueResolution.score}%</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-[1.5rem] bg-white">
+                  <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[13px] font-bold text-slate-700">Active Alerts</p>
+                      <div className="p-1.5 bg-yellow-50 rounded-xl text-yellow-600"><Bell className="size-4" /></div>
+                    </div>
+                    <div>
+                      <div className="flex items-end gap-2">
+                        <span className="text-3xl font-display font-bold text-slate-900">{data.alerts.length.toString().padStart(2, '0')}</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">Unresolved</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-yellow-400 rounded-full" style={{ width: `${alertsLoadPercent}%` }} />
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-500">{alertsLoadPercent}%</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-[1.5rem] bg-white">
+                  <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[13px] font-bold text-slate-700">WIP Count</p>
+                      <div className="p-1.5 bg-emerald-50 rounded-xl text-emerald-500"><Activity className="size-4" /></div>
+                    </div>
+                    <div>
+                      <div className="flex items-end gap-2">
+                        <span className="text-3xl font-display font-bold text-slate-900">{(data.overview.totalWIP ?? 0).toString().padStart(2, '0')}</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">Active Work In Progress</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${wipLoadPercent}%` }} />
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-500">{wipLoadPercent}%</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-[1.5rem] bg-white">
+                  <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[13px] font-bold text-slate-700">Avg Cycle Time</p>
+                      <div className="p-1.5 bg-indigo-50 rounded-xl text-indigo-500"><Clock className="size-4" /></div>
+                    </div>
+                    <div>
+                      <span className="text-3xl font-display font-bold text-slate-900">{formatSeconds(data.overview.avgCycleTimeSeconds)}</span>
+                      <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">Webhook Cycle Metrics</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-[1.5rem] bg-white">
+                  <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[13px] font-bold text-slate-700">Commit Velocity</p>
+                      <div className="p-1.5 bg-pink-50 rounded-xl text-pink-500"><TrendingUp className="size-4" /></div>
+                    </div>
+                    <div>
+                      <span className="text-3xl font-display font-bold text-slate-900">{healthBreakdown.commitVelocity.score}%</span>
+                      <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">{healthBreakdown.commitVelocity.detail}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-[1.5rem] bg-white">
+                  <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[13px] font-bold text-slate-700">PR Throughput</p>
+                      <div className="p-1.5 bg-blue-50 rounded-xl text-blue-500"><GitPullRequest className="size-4" /></div>
+                    </div>
+                    <div>
+                      <span className="text-3xl font-display font-bold text-slate-900">{healthBreakdown.prThroughput.score}%</span>
+                      <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">{healthBreakdown.prThroughput.detail}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-[1.5rem] bg-white">
+                  <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[13px] font-bold text-slate-700">Issue Resolution</p>
+                      <div className="p-1.5 bg-red-50 rounded-xl text-red-500"><AlertCircle className="size-4" /></div>
+                    </div>
+                    <div>
+                      <span className="text-3xl font-display font-bold text-slate-900">{healthBreakdown.issueResolution.score}%</span>
+                      <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">{healthBreakdown.issueResolution.detail}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-[1.5rem] bg-white">
+                  <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[13px] font-bold text-slate-700">Activity Spread</p>
+                      <div className="p-1.5 bg-emerald-50 rounded-xl text-emerald-500"><Users className="size-4" /></div>
+                    </div>
+                    <div>
+                      <span className="text-3xl font-display font-bold text-slate-900">{healthBreakdown.activitySpread.score}%</span>
+                      <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">{healthBreakdown.activitySpread.detail}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-[0_8px_28px_rgba(0,0,0,0.05)] rounded-[1.75rem] bg-white md:col-span-2 xl:col-span-2">
+                  <CardContent className="p-6 flex flex-col h-full justify-between gap-5">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[18px] font-display font-bold text-slate-800">Contributor Health</p>
+                      <div className="p-2 bg-amber-50 rounded-xl text-amber-600"><Shield className="size-5" /></div>
+                    </div>
+                    <div>
+                      <span className="text-5xl font-display font-bold text-slate-900">{healthBreakdown.healthDiversity.score}%</span>
+                      <p className="text-[13px] text-slate-500 mt-1 font-semibold">{activeContributors + moderateContributors}/{contributorHealthRows.length} active contributors</p>
+                      <p className="text-[11px] text-slate-400 mt-2 uppercase tracking-wider font-semibold">{healthBreakdown.healthDiversity.detail}</p>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                      <div className="h-full bg-emerald-500" style={{ width: `${healthBreakdown.healthDiversity.score}%` }} />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-[0_8px_28px_rgba(0,0,0,0.05)] rounded-[1.75rem] bg-white md:col-span-2 xl:col-span-3">
+                  <CardContent className="p-6 flex flex-col h-full justify-between gap-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[18px] font-display font-bold text-slate-800">Contributor Activity</p>
+                      <div className="p-2 bg-slate-100 rounded-xl text-slate-600"><Activity className="size-5" /></div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-sm">
+                      <div className="rounded-xl bg-emerald-50 px-3 py-2 text-center"><p className="text-xs text-slate-500">Active</p><p className="text-lg font-bold text-emerald-600">{activeContributors}</p></div>
+                      <div className="rounded-xl bg-yellow-50 px-3 py-2 text-center"><p className="text-xs text-slate-500">Moderate</p><p className="text-lg font-bold text-yellow-700">{moderateContributors}</p></div>
+                      <div className="rounded-xl bg-red-50 px-3 py-2 text-center"><p className="text-xs text-slate-500">Inactive</p><p className="text-lg font-bold text-red-600">{inactiveContributors}</p></div>
+                    </div>
+                    <div className="pt-3 border-t border-slate-100 space-y-2">
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Individual Activity</p>
+                      {individualContributorActivity.length === 0 ? (
+                        <p className="text-sm text-slate-500">No contributor activity data yet.</p>
+                      ) : (
+                        individualContributorActivity.map((person) => {
+                          const hours = Math.round(person.hours_since_last_commit)
+                          const ageLabel = hours < 24 ? `${hours}h` : hours < 24 * 30 ? `${Math.round(hours / 24)}d` : '>30d'
+                          return (
+                          <div key={person.author} className="flex items-center justify-between gap-2 py-1.5">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {person.avatar_url ? (
+                                <img src={person.avatar_url} alt="" className="w-8 h-8 rounded-full shrink-0" />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 text-xs font-bold flex items-center justify-center shrink-0">
+                                  {person.author?.[0]?.toUpperCase()}
+                                </div>
+                              )}
+                              <span className="text-sm font-semibold text-slate-700 truncate">{person.author}</span>
+                            </div>
+                            <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                              person.status === 'active' ? 'bg-emerald-100 text-emerald-700' :
+                              person.status === 'moderate' ? 'bg-yellow-100 text-yellow-700' :
+                              'bg-red-100 text-red-700'
+                            }`}>
+                              {person.status} · {ageLabel}
+                            </span>
                           </div>
-                          <span className="text-xs text-muted-foreground w-10 shrink-0">{duration}h</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-            </Card>
-
-            {/* Cycle Time Trend */}
-            {data.cycleTimeTrend && data.cycleTimeTrend.length > 0 && (
-              <Card className="py-0 shadow-sm border-border/50">
-              <CardContent className="p-5">
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5" /> Cycle Time Trend (hours)
-                </p>
-                {(() => {
-                  const trendData = [...data.cycleTimeTrend].reverse().map((m, i) => ({
-                    label: `PR ${i + 1}`,
-                    coding: m.codingTime ? Math.round(m.codingTime / 3600) : 0,
-                    pickup: m.pickupTime ? Math.round(m.pickupTime / 3600) : 0,
-                    review: m.reviewTime ? Math.round(m.reviewTime / 3600) : 0,
-                    deploy: m.deploymentTime ? Math.round(m.deploymentTime / 3600) : 0,
-                  }))
-                  return (
-                    <div className="h-[180px]">
-                      <ChartLine
-                        data={{
-                          labels: trendData.map((d) => d.label),
-                          datasets: [
-                            { label: 'Coding', data: trendData.map((d) => d.coding), borderColor: '#404040', backgroundColor: 'rgba(64,64,64,0.15)', fill: true, tension: 0.4, pointRadius: 2 },
-                            { label: 'Pickup', data: trendData.map((d) => d.pickup), borderColor: '#737373', backgroundColor: 'rgba(115,115,115,0.15)', fill: true, tension: 0.4, pointRadius: 2 },
-                            { label: 'Review', data: trendData.map((d) => d.review), borderColor: '#a3a3a3', backgroundColor: 'rgba(163,163,163,0.15)', fill: true, tension: 0.4, pointRadius: 2 },
-                            { label: 'Deploy', data: trendData.map((d) => d.deploy), borderColor: '#d4d4d4', backgroundColor: 'rgba(212,212,212,0.15)', fill: true, tension: 0.4, pointRadius: 2 },
-                          ],
-                        }}
-                        options={{
-                          responsive: true,
-                          maintainAspectRatio: false,
-                          interaction: { mode: 'index' as const, intersect: false },
-                          plugins: { legend: { display: true, position: 'bottom' as const, labels: { boxWidth: 8, usePointStyle: true, pointStyle: 'circle', padding: 16, color: 'hsl(var(--muted-foreground))', font: { size: 10 } } } },
-                          scales: {
-                            x: { grid: { display: false }, ticks: { color: 'hsl(var(--muted-foreground))', font: { size: 10 } } },
-                            y: { grid: { color: 'hsl(var(--border))' }, ticks: { color: 'hsl(var(--muted-foreground))', font: { size: 10 } } },
-                          },
-                        }}
-                      />
+                          )
+                        })
+                      )}
                     </div>
-                  )
-                })()}
-              </CardContent>
-              </Card>
-            )}
+                  </CardContent>
+                </Card>
 
-            {/* WIP per User */}
-            {data.wipPerUser && data.wipPerUser.length > 0 && (
-              <Card className="py-0 shadow-sm border-border/50">
-              <CardContent className="p-5">
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4 flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5" /> WIP per Contributor
-                </p>
-                <div className="space-y-2">
-                  {data.wipPerUser.map((w) => (
-                    <div key={w.username} className="flex items-center gap-3">
-                      <div className="w-6 h-6 bg-muted rounded-full flex items-center justify-center shrink-0">
-                        <span className="text-[9px] font-bold text-muted-foreground">{w.username.charAt(0).toUpperCase()}</span>
-                      </div>
-                      <span className="text-xs font-medium text-foreground w-32 truncate">{w.username}</span>
-                      <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full transition-all ${w.count > 3 ? 'bg-red-400' : w.count > 1 ? 'bg-orange-400' : 'bg-emerald-400'}`}
-                          style={{ width: `${Math.min(100, (w.count / 5) * 100)}%` }} />
-                      </div>
-                      <span className={`text-xs font-medium ${w.count > 3 ? 'text-red-400' : w.count > 1 ? 'text-orange-400' : 'text-emerald-400'}`}>{w.count} open</span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-              </Card>
-            )}
+              </div>
+            </div>
+
           </div>
         )}
 
-        {/* COMMITS TAB */}
         {tab === 'commits' && data && (
           <Card className="py-0 shadow-sm border-border/50 overflow-hidden">
             <CardContent className="p-0">
@@ -1142,21 +1421,31 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
               <div className="flex items-center gap-4">
                 <div>
                   <h2 className="text-sm font-semibold text-foreground">Recent Commits</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">{commitFilter === 'all' ? data.recentCommits.length : data.recentCommits.filter((c) => c.author_github_username === commitFilter).length} commits {commitFilter !== 'all' ? `by ${commitFilter}` : 'ingested via GitHub webhook'}</p>
+                  {commitFilter === 'all' ? (
+                    <p className="text-xs text-muted-foreground mt-0.5">{data.recentCommits.length} commits ingested via GitHub webhook</p>
+                  ) : (
+                    <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span>{data.recentCommits.filter((c) => c.author_github_username === commitFilter).length} commits by</span>
+                      {renderContributorIdentity(commitFilter, { avatarSizeClass: 'size-4', textClassName: 'text-xs font-medium text-muted-foreground' })}
+                    </div>
+                  )}
                 </div>
                 {data.recentCommits.length > 0 && (() => {
                   const authors = Array.from(new Set(data.recentCommits.map((c) => c.author_github_username).filter(Boolean))) as string[]
                   return authors.length > 1 ? (
-                    <select
-                      value={commitFilter}
-                      onChange={(e) => { setCommitFilter(e.target.value); setCommitsPage(0) }}
-                      className="px-3 py-1.5 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                    >
-                      <option value="all">All Contributors</option>
-                      {authors.sort().map((a) => (
-                        <option key={a} value={a}>{a}</option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <select
+                        value={commitFilter}
+                        onChange={(e) => { setCommitFilter(e.target.value); setCommitsPage(0) }}
+                        className="appearance-none pl-4 pr-9 h-10 min-w-[210px] text-sm font-semibold bg-white border border-slate-200 rounded-2xl text-slate-800 shadow-[0_2px_10px_rgba(15,23,42,0.06)] focus:outline-none focus:ring-2 focus:ring-slate-300"
+                      >
+                        <option value="all">All Contributors</option>
+                        {authors.sort().map((a) => (
+                          <option key={a} value={a}>{a}</option>
+                        ))}
+                      </select>
+                      <ChevronRight className="pointer-events-none size-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2 rotate-90" />
+                    </div>
                   ) : null
                 })()}
               </div>
@@ -1174,6 +1463,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       const d = await res.json()
                       if (res.ok) {
                         setCommitSummary(d)
+                        fetchTodos()
                       } else {
                         toast.error(d.error || 'Failed to summarize commits')
                       }
@@ -1194,11 +1484,16 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
 
             {/* AI Commit + Task Progress Analysis */}
             {commitSummary && (
-              <div className="px-5 py-4 border-b border-border bg-muted/20 space-y-4">
+              <div className="px-5 py-5 border-b border-border bg-muted/20 space-y-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Brain className="size-4 text-muted-foreground" />
                     <span className="text-xs font-semibold text-foreground">AI Progress Analysis</span>
+                    {(commitSummary.syncedTasksCount ?? 0) > 0 && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">
+                        Synced {commitSummary.syncedTasksCount} task{(commitSummary.syncedTasksCount ?? 0) === 1 ? '' : 's'}
+                      </span>
+                    )}
                   </div>
                   <button onClick={() => setCommitSummary(null)} className="text-muted-foreground hover:text-foreground">
                     <X className="size-3.5" />
@@ -1206,7 +1501,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                 </div>
 
                 {/* Completion percentage */}
-                <div className="bg-background rounded-lg border border-border p-4">
+                <div className="bg-background rounded-xl border border-border p-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-semibold text-foreground">Work Completion</span>
                     <span className="text-lg font-bold text-foreground">{commitSummary.completionPercent}%</span>
@@ -1220,15 +1515,18 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   <p className="text-[10px] text-muted-foreground mt-1.5">{commitSummary.workInsight}</p>
                 </div>
 
-                <p className="text-xs text-muted-foreground leading-relaxed">{commitSummary.summary}</p>
+                <div className="bg-white rounded-xl border border-border p-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Executive Summary</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{commitSummary.summary}</p>
+                </div>
 
                 {/* Task progress mapping */}
                 {commitSummary.taskProgress.length > 0 && (
-                  <div>
-                    <span className="text-[10px] font-semibold text-foreground uppercase tracking-wider">Task Progress from Commits</span>
-                    <div className="mt-2 space-y-1.5">
+                  <div className="bg-white rounded-xl border border-border p-4">
+                    <span className="text-[10px] font-semibold text-foreground uppercase tracking-wider">Task Progress From Commits</span>
+                    <div className="mt-3 space-y-2">
                       {commitSummary.taskProgress.map((tp, i) => (
-                        <div key={i} className="flex items-start gap-2 text-xs">
+                        <div key={i} className="flex items-start gap-2 text-xs bg-muted/30 rounded-lg p-2.5">
                           <span className={`mt-0.5 shrink-0 size-2 rounded-full ${
                             tp.status === 'addressed' ? 'bg-foreground' :
                             tp.status === 'partially-addressed' ? 'bg-muted-foreground' : 'bg-muted'
@@ -1244,7 +1542,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                                 {tp.status === 'addressed' ? 'Done' : tp.status === 'partially-addressed' ? 'In Progress' : 'Not Started'}
                               </span>
                             </div>
-                            <p className="text-muted-foreground mt-0.5 truncate">{tp.evidence}</p>
+                            <p className="text-muted-foreground mt-0.5 whitespace-pre-wrap break-words">{tp.evidence}</p>
                           </div>
                         </div>
                       ))}
@@ -1252,10 +1550,11 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   </div>
                 )}
 
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {commitSummary.highlights.length > 0 && (
-                  <div>
+                  <div className="bg-white rounded-xl border border-border p-4">
                     <span className="text-[10px] font-semibold text-foreground uppercase tracking-wider">Highlights</span>
-                    <ul className="mt-1 space-y-0.5">
+                    <ul className="mt-2 space-y-1">
                       {commitSummary.highlights.map((h, i) => (
                         <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
                           <span className="text-foreground mt-0.5">•</span> {h}
@@ -1265,17 +1564,19 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   </div>
                 )}
                 {Object.keys(commitSummary.authorBreakdown).length > 0 && (
-                  <div>
+                  <div className="bg-white rounded-xl border border-border p-4">
                     <span className="text-[10px] font-semibold text-foreground uppercase tracking-wider">By Author</span>
-                    <div className="mt-1 space-y-0.5">
+                    <div className="mt-2 space-y-1">
                       {Object.entries(commitSummary.authorBreakdown).map(([author, desc]) => (
-                        <div key={author} className="text-xs text-muted-foreground">
-                          <span className="font-medium text-foreground">{author}:</span> {desc}
+                        <div key={author} className="text-xs text-muted-foreground flex items-start gap-2">
+                          <div className="shrink-0 mt-0.5">{renderContributorIdentity(author, { avatarSizeClass: 'size-4', textClassName: 'text-xs font-medium text-foreground' })}</div>
+                          <span className="text-muted-foreground">{desc}</span>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
+                </div>
               </div>
             )}
             {data.recentCommits.length === 0 ? (
@@ -1377,9 +1678,10 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                               <span className="text-xs text-muted-foreground">#{pr.github_pr_number}</span>
                             </div>
                             <p className="text-sm font-medium text-foreground truncate">{pr.title}</p>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              by {pr.author_github_username} · {formatDistanceToNow(new Date(pr.opened_at), { addSuffix: true })}
-                            </p>
+                            <div className="mt-1 flex items-center gap-2">
+                              {renderContributorIdentity(pr.author_github_username, { avatarSizeClass: 'size-4', textClassName: 'text-xs font-medium text-muted-foreground truncate' })}
+                              <span className="text-xs text-muted-foreground">· {formatDistanceToNow(new Date(pr.opened_at), { addSuffix: true })}</span>
+                            </div>
                             {cycleInfo && (
                               <div className="flex items-center gap-2 mt-2 flex-wrap">
                                 {cycleInfo.codingTime != null && <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/10">Coding {formatSeconds(cycleInfo.codingTime)}</Badge>}
@@ -1448,7 +1750,10 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                           </div>
                           <p className="text-sm font-medium text-foreground truncate">{issue.title}</p>
                           {issue.assignee_github_username && (
-                            <p className="text-xs text-muted-foreground mt-1">Assigned to {issue.assignee_github_username}</p>
+                            <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <span>Assigned to</span>
+                              {renderContributorIdentity(issue.assignee_github_username, { avatarSizeClass: 'size-4', textClassName: 'text-xs font-medium text-muted-foreground truncate' })}
+                            </div>
                           )}
                         </div>
                         <div className="text-xs text-muted-foreground shrink-0">
@@ -1631,7 +1936,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                         <p className="text-xs font-mono text-foreground truncate">{f.file}</p>
                         <p className="text-[10px] text-muted-foreground mt-0.5">{f.authorCount} author{f.authorCount !== 1 ? 's' : ''} · bus factor {f.busFactor}</p>
                       </div>
-                      <span className="text-xs text-muted-foreground truncate">{f.dominant_author}</span>
+                      <div className="min-w-0">{renderContributorIdentity(f.dominant_author, { avatarSizeClass: 'size-4', textClassName: 'text-xs text-muted-foreground truncate' })}</div>
                       <div className="text-right">
                         <div className="inline-flex items-center gap-1.5">
                           <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
@@ -1658,26 +1963,67 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   <GitBranch className="w-3.5 h-3.5" /> Dependency Risk Map (Force Graph)
                 </p>
                 {(() => {
-                  // Build graph data: nodes are files, links connect files sharing the same dominant author
+                  // Build graph data with stronger relationship links so the map remains readable and expressive
                   const nodes = data.criticalFiles.slice(0, 20).map((f) => ({
                     id: f.file,
-                    label: f.file.split('/').pop() ?? f.file,
+                    label: f.file.startsWith('@') ? f.file.replace('@', '') : (f.file.split('/').pop() ?? f.file),
                     concentration: f.concentration,
                     busFactor: f.busFactor,
                     dominant: f.dominant_author,
                     val: Math.max(1, 100 - f.busFactor * 20),
                   }))
-                  const links: Array<{ source: string; target: string }> = []
+                  const links: Array<{ source: string; target: string; strength?: number }> = []
+                  const linkSet = new Set<string>()
+                  const pushLink = (source: string, target: string, strength: number) => {
+                    const key = source < target ? `${source}::${target}` : `${target}::${source}`
+                    if (linkSet.has(key)) return
+                    linkSet.add(key)
+                    links.push({ source, target, strength })
+                  }
+
+                  // Link files that share dominant author
                   for (let i = 0; i < nodes.length; i++) {
                     for (let j = i + 1; j < nodes.length; j++) {
                       if (nodes[i].dominant && nodes[i].dominant === nodes[j].dominant) {
-                        links.push({ source: nodes[i].id, target: nodes[j].id })
+                        pushLink(nodes[i].id, nodes[j].id, 1.2)
                       }
                     }
                   }
+
+                  // Link by concentration neighborhood for better shape when dominant author is sparse
+                  const sortedByRisk = [...nodes].sort((a, b) => b.concentration - a.concentration)
+                  for (let i = 0; i < sortedByRisk.length - 1; i++) {
+                    pushLink(sortedByRisk[i].id, sortedByRisk[i + 1].id, 0.85)
+                  }
+
+                  // Ensure hub connectivity from highest-risk node
+                  if (sortedByRisk.length > 2) {
+                    const hub = sortedByRisk[0]
+                    for (let i = 1; i < Math.min(sortedByRisk.length, 6); i++) {
+                      pushLink(hub.id, sortedByRisk[i].id, 0.65)
+                    }
+                  }
+
+                  const topContributors = [...new Set(data.criticalFiles
+                    .map((f) => f.dominant_author)
+                    .filter((author): author is string => Boolean(author)))]
+                    .slice(0, 6)
+
                   return (
-                    <div className="w-full h-[300px] bg-background rounded-lg border border-border overflow-hidden relative">
-                      <ForceGraph nodes={nodes} links={links} />
+                    <div className="space-y-3">
+                      <div className="w-full h-[320px] bg-background rounded-lg border border-border overflow-hidden relative">
+                        <ForceGraph nodes={nodes} links={links} />
+                      </div>
+                      {topContributors.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Top contributors in map:</span>
+                          {topContributors.map((author) => (
+                            <div key={author} className="px-2.5 py-1 rounded-full bg-muted/60 border border-border text-[10px]">
+                              {renderContributorIdentity(author, { avatarSizeClass: 'size-4', textClassName: 'text-[10px] font-semibold text-foreground' })}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )
                 })()}
@@ -1689,166 +2035,224 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
 
         {/* MESSAGES TAB */}
         {tab === 'messages' && data && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-4">
-              <h2 className="text-sm font-semibold text-foreground">Team Messages ({realtimeMessages.length}){realtimeMessages.length > 0 && <span className="ml-1.5 inline-block w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" title="Live" />}</h2>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                <Input
-                  type="text"
-                  value={msgSearch}
-                  onChange={(e) => setMsgSearch(e.target.value)}
-                  placeholder="Search messages..."
-                  className="pl-8 text-xs w-64"
-                />
-              </div>
-            </div>
+          <div className="space-y-5">
+            <Card className="py-0 border-0 shadow-[0_8px_30px_rgba(0,0,0,0.04)] rounded-[2rem] overflow-hidden bg-white">
+              <CardContent className="p-5 space-y-4">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-display font-bold text-slate-900 flex items-center gap-2">
+                      Team Messages ({realtimeMessages.length})
+                      {realtimeMessages.length > 0 && <span className="inline-block w-2 h-2 bg-emerald-500 rounded-full animate-pulse" title="Live" />}
+                    </h2>
+                    <p className="text-xs text-slate-500">Live stream with blocker and keyword detection from message analysis.</p>
+                  </div>
+                  <div className="relative w-full lg:w-80">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      value={msgSearch}
+                      onChange={(e) => setMsgSearch(e.target.value)}
+                      placeholder="Search by author, channel or content"
+                      className="pl-8 text-xs"
+                    />
+                  </div>
+                </div>
 
-            {/* Compose bar */}
-            <Card className="py-0 shadow-sm border-border/50">
-              <CardContent className="p-3">
-              <form onSubmit={async (e) => {
-                e.preventDefault()
-                if (!msgInput.trim() || sendingMsg || !token) return
-                const content = msgInput.trim()
-                setSendingMsg(true)
-                setMsgInput('')
-                // Optimistic: add message instantly
-                const optimisticId = `opt-${Date.now()}`
-                const optimisticMsg = {
-                  id: optimisticId,
-                  source: 'app',
-                  channel_name: 'general',
-                  author_username: user?.name ?? user?.email ?? 'You',
-                  content,
-                  sent_at: new Date().toISOString(),
-                  intent: null,
-                  entities: null,
-                }
-                pendingOptimisticIds.current.add(optimisticId)
-                setRealtimeMessages((prev) => [optimisticMsg, ...prev])
-                try {
-                  const res = await fetch(`/api/workspaces/${workspaceId}/messages`, {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content }),
-                  })
-                  if (res.ok) {
-                    const { message: saved } = await res.json()
-                    // Replace optimistic message with server response (has real id + NLP intent)
-                    // The Realtime event may have already replaced it — handle both cases
-                    setRealtimeMessages((prev) => {
-                      const hasOptimistic = prev.some((m) => m.id === optimisticId)
-                      const hasReal = prev.some((m) => m.id === saved.id)
-                      if (hasOptimistic && !hasReal) {
-                        // Normal case: replace optimistic with real
-                        return prev.map((m) => m.id === optimisticId ? { ...saved } : m)
-                      } else if (hasOptimistic && hasReal) {
-                        // Realtime already added it — just remove optimistic
-                        return prev.filter((m) => m.id !== optimisticId)
-                      }
-                      // Optimistic was already replaced by Realtime handler — nothing to do
-                      return prev
-                    })
-                    pendingOptimisticIds.current.delete(optimisticId)
-                  } else {
-                    const d = await res.json()
-                    toast.error(d.error || 'Failed to send')
-                    setRealtimeMessages((prev) => prev.filter((m) => m.id !== optimisticId))
-                    pendingOptimisticIds.current.delete(optimisticId)
-                  }
-                } catch {
-                  toast.error('Failed to send message')
-                  setRealtimeMessages((prev) => prev.filter((m) => m.id !== optimisticId))
-                  pendingOptimisticIds.current.delete(optimisticId)
-                }
-                finally { setSendingMsg(false) }
-              }} className="flex items-end gap-2">
-                <textarea
-                  value={msgInput}
-                  onChange={(e) => setMsgInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      e.currentTarget.form?.requestSubmit()
-                    }
-                  }}
-                  placeholder="Type a message to your team... (Enter to send, Shift+Enter for new line)"
-                  rows={1}
-                  className="flex-1 px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none min-h-[36px] max-h-[120px]"
-                  style={{ height: 'auto', overflow: 'hidden' }}
-                  onInput={(e) => { const t = e.currentTarget; t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px' }}
-                />
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={sendingMsg || !msgInput.trim()}
-                  className="shrink-0 gap-1.5"
-                >
-                  {sendingMsg ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Send className="w-3 h-3" />}
-                  Send
-                </Button>
-              </form>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-[11px] text-slate-500">Total Messages</p>
+                    <p className="text-xl font-bold text-slate-900 mt-0.5">{realtimeMessages.length}</p>
+                  </div>
+                  <div className="rounded-2xl border border-red-100 bg-red-50 p-3">
+                    <p className="text-[11px] text-red-500">Detected Blockers</p>
+                    <p className="text-xl font-bold text-red-600 mt-0.5">{blockerMessagesCount}</p>
+                  </div>
+                  <div className="rounded-2xl border border-amber-100 bg-amber-50 p-3">
+                    <p className="text-[11px] text-amber-600">Messages With Keywords</p>
+                    <p className="text-xl font-bold text-amber-700 mt-0.5">{keywordMessagesCount}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    { id: 'all', label: 'All' },
+                    { id: 'blockers', label: 'Blockers' },
+                    { id: 'keywords', label: 'Keywords' },
+                    { id: 'questions', label: 'Questions' },
+                  ] as const).map((filter) => (
+                    <button
+                      key={filter.id}
+                      onClick={() => setMsgViewFilter(filter.id)}
+                      className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                        msgViewFilter === filter.id
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
+                </div>
               </CardContent>
             </Card>
 
-            {realtimeMessages.length === 0 ? (
+            <Card className="py-0 border-0 shadow-[0_8px_30px_rgba(0,0,0,0.04)] rounded-[2rem] overflow-hidden bg-white">
+              <CardContent className="p-4">
+                <form onSubmit={async (e) => {
+                  e.preventDefault()
+                  if (!msgInput.trim() || sendingMsg || !token) return
+                  const content = msgInput.trim()
+                  setSendingMsg(true)
+                  setMsgInput('')
+                  const optimisticId = `opt-${Date.now()}`
+                  const optimisticMsg = {
+                    id: optimisticId,
+                    source: 'app',
+                    channel_name: 'general',
+                    author_username: user?.name ?? user?.email ?? 'You',
+                    content,
+                    sent_at: new Date().toISOString(),
+                    intent: null,
+                    entities: null,
+                    is_blocker: false,
+                  }
+                  pendingOptimisticIds.current.add(optimisticId)
+                  setRealtimeMessages((prev) => [optimisticMsg, ...prev])
+                  try {
+                    const res = await fetch(`/api/workspaces/${workspaceId}/messages`, {
+                      method: 'POST',
+                      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ content }),
+                    })
+                    if (res.ok) {
+                      const { message: saved } = await res.json()
+                      setRealtimeMessages((prev) => {
+                        const hasOptimistic = prev.some((m) => m.id === optimisticId)
+                        const hasReal = prev.some((m) => m.id === saved.id)
+                        if (hasOptimistic && !hasReal) return prev.map((m) => m.id === optimisticId ? { ...saved } : m)
+                        if (hasOptimistic && hasReal) return prev.filter((m) => m.id !== optimisticId)
+                        return prev
+                      })
+                      pendingOptimisticIds.current.delete(optimisticId)
+                    } else {
+                      const d = await res.json()
+                      toast.error(d.error || 'Failed to send')
+                      setRealtimeMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+                      pendingOptimisticIds.current.delete(optimisticId)
+                    }
+                  } catch {
+                    toast.error('Failed to send message')
+                    setRealtimeMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+                    pendingOptimisticIds.current.delete(optimisticId)
+                  }
+                  finally { setSendingMsg(false) }
+                }} className="flex items-end gap-2">
+                  <textarea
+                    value={msgInput}
+                    onChange={(e) => setMsgInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        e.currentTarget.form?.requestSubmit()
+                      }
+                    }}
+                    placeholder="Share updates, blockers, or task progress..."
+                    rows={1}
+                    className="flex-1 px-3 py-2 text-xs bg-background border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none min-h-[36px] max-h-[120px]"
+                    style={{ height: 'auto', overflow: 'hidden' }}
+                    onInput={(e) => { const t = e.currentTarget; t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px' }}
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={sendingMsg || !msgInput.trim()}
+                    className="shrink-0 gap-1.5"
+                  >
+                    {sendingMsg ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Send className="w-3 h-3" />}
+                    Send
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            {filteredMessages.length === 0 ? (
               <Card className="py-0 shadow-sm border-border/50">
                 <CardContent className="py-12 text-center">
-                <MessageSquare className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">No messages yet.</p>
-                <p className="text-xs text-muted-foreground mt-1">Send the first message to your team above!</p>
+                  <MessageSquare className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">No messages match this view.</p>
+                  <p className="text-xs text-muted-foreground mt-1">Try clearing search or changing the filter.</p>
                 </CardContent>
               </Card>
             ) : (
-              <Card className="py-0 shadow-sm border-border/50 overflow-hidden">
-                <CardContent className="p-0 divide-y divide-border">
-                {realtimeMessages
-                  .filter((m) => {
-                    if (!msgSearch) return true
-                    const q = msgSearch.toLowerCase()
-                    return m.content.toLowerCase().includes(q) || m.author_username.toLowerCase().includes(q) || (m.channel_name ?? '').toLowerCase().includes(q)
-                  })
-                  .map((msg) => {
+              <Card className="py-0 border-0 shadow-[0_8px_30px_rgba(0,0,0,0.04)] rounded-[2rem] overflow-hidden bg-white">
+                <CardContent className="p-0 divide-y divide-border max-h-[560px] overflow-y-auto">
+                  {filteredMessages.map((msg) => {
                     const sourceConfig: Record<string, { bg: string; text: string; label: string }> = {
                       app: { bg: 'bg-primary/20', text: 'text-primary', label: 'CSP' },
-                      discord: { bg: 'bg-indigo-500/20', text: 'text-indigo-400', label: 'D' },
-                      whatsapp: { bg: 'bg-emerald-500/20', text: 'text-emerald-400', label: 'W' },
+                      discord: { bg: 'bg-indigo-500/20', text: 'text-indigo-500', label: 'D' },
+                      whatsapp: { bg: 'bg-emerald-500/20', text: 'text-emerald-500', label: 'W' },
                     }
                     const src = sourceConfig[msg.source] ?? sourceConfig.app
+                    const keywords = messageKeywords(msg)
+                    const isBlocker = isBlockerMessage(msg)
+                    const aiSummary = typeof msg.entities?.aiSummary === 'string' ? msg.entities.aiSummary : null
+                    const intentTone = msg.intent === 'blocker'
+                      ? 'bg-red-50 text-red-700 border-red-200'
+                      : msg.intent === 'question'
+                        ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                        : msg.intent === 'progress_update' || msg.intent === 'status_update'
+                          ? 'bg-blue-50 text-blue-700 border-blue-200'
+                          : msg.intent === 'task_claim'
+                            ? 'bg-purple-50 text-purple-700 border-purple-200'
+                            : 'bg-slate-100 text-slate-600 border-slate-200'
+
                     return (
-                      <div key={msg.id} className="px-5 py-3.5 hover:bg-muted/30 transition-colors">
+                      <div key={msg.id} className="px-5 py-4 hover:bg-slate-50 transition-colors">
                         <div className="flex items-start gap-3">
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${src.bg}`}>
-                            <span className={`text-[9px] font-bold ${src.text}`}>{src.label}</span>
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${src.bg}`}>
+                            <span className={`text-[10px] font-bold ${src.text}`}>{src.label}</span>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-0.5">
-                              <span className="text-xs font-medium text-foreground">{msg.author_username}</span>
+
+                          <div className="flex-1 min-w-0 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-slate-900">{msg.author_username}</span>
                               {msg.channel_name && (
-                                <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                                <span className="text-[10px] text-slate-500 flex items-center gap-0.5 bg-slate-100 rounded-full px-2 py-0.5">
                                   <Hash className="w-2.5 h-2.5" />{msg.channel_name}
                                 </span>
                               )}
-                              <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
+                              <span className="text-[10px] text-slate-500 ml-auto shrink-0">
                                 {formatDistanceToNow(new Date(msg.sent_at), { addSuffix: true })}
                               </span>
                             </div>
-                            <p className="text-xs text-foreground/80 whitespace-pre-wrap break-words">{msg.content}</p>
-                            {msg.intent && msg.intent !== 'general' && (
-                              <div className="flex items-center gap-2 mt-1.5">
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                                  msg.intent === 'blocker' ? 'bg-red-500/10 text-red-400' :
-                                  msg.intent === 'status_update' ? 'bg-blue-500/10 text-blue-400' :
-                                  msg.intent === 'question' ? 'bg-yellow-500/10 text-yellow-400' :
-                                  msg.intent === 'decision' ? 'bg-purple-500/10 text-purple-400' :
-                                  'bg-zinc-500/10 text-zinc-400'
-                                }`}>
+
+                            <p className="text-sm text-slate-700 whitespace-pre-wrap wrap-break-word">{msg.content}</p>
+
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {isBlocker && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200 font-semibold flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3" /> Blocker
+                                </span>
+                              )}
+                              {msg.intent && msg.intent !== 'general' && (
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold ${intentTone}`}>
                                   {msg.intent.replace(/_/g, ' ')}
                                 </span>
-                              </div>
+                              )}
+                              {keywords.slice(0, 4).map((keyword) => (
+                                <span key={keyword} className="text-[10px] px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700 font-medium">
+                                  {keyword}
+                                </span>
+                              ))}
+                            </div>
+
+                            {aiSummary && (
+                              <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2">
+                                <span className="font-semibold text-slate-700">AI Summary:</span> {aiSummary}
+                              </p>
                             )}
                           </div>
+
                           {isAdmin && !msg.id.startsWith('opt-') && (
                             <button
                               onClick={async () => {
@@ -1867,8 +2271,11 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                                     const d = await res.json()
                                     toast.error(d.error || 'Failed to delete')
                                   }
-                                } catch { toast.error('Failed to delete message') }
-                                finally { setDeletingMsgId(null) }
+                                } catch {
+                                  toast.error('Failed to delete message')
+                                } finally {
+                                  setDeletingMsgId(null)
+                                }
                               }}
                               disabled={deletingMsgId === msg.id}
                               className="shrink-0 p-1.5 text-muted-foreground hover:text-red-400 transition-colors rounded-md hover:bg-red-500/10 disabled:opacity-50"
@@ -2097,676 +2504,251 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
 
         {/* AI INSIGHTS TAB */}
         {tab === 'insights' && (
-          <div className="max-w-4xl mx-auto space-y-6">
-            {/* Project Progress */}
+          <div className="max-w-4xl mx-auto py-8 animate-in fade-in duration-500">
             {(() => {
-              const total = todos.length
-              const completed = todos.filter((t) => t.status === 'completed').length
-              const inProgress = todos.filter((t) => t.status === 'in-progress').length
-              const pending = todos.filter((t) => t.status === 'pending').length
-              const pct = total > 0 ? Math.round((completed / total) * 100) : 0
-              const overdue = todos.filter((t) => t.deadline && new Date(t.deadline) < new Date() && t.status !== 'completed').length
-              return (
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <Card className="py-0 shadow-sm border-border/50">
-                    <CardContent className="p-5 flex flex-col items-center">
-                    <div className="relative w-20 h-20 mb-2">
-                      <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
-                        <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeWidth="8" className="text-muted/30" />
-                        <circle cx="50" cy="50" r="40" fill="none" stroke={pct >= 75 ? '#a3a3a3' : pct >= 40 ? '#737373' : '#525252'} strokeWidth="8" strokeDasharray={`${(pct / 100) * 251.2} 251.2`} strokeLinecap="round" className="transition-all duration-700" />
-                      </svg>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-lg font-bold text-foreground">{pct}%</span>
-                      </div>
-                    </div>
-                    <span className="text-xs font-medium text-muted-foreground">Project Progress</span>
-                    </CardContent>
-                  </Card>
-                  <Card className="py-0 shadow-sm border-border/50">
-                    <CardContent className="p-5">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Total Tasks</span>
-                      <ListTodo className="w-4 h-4 text-muted-foreground" />
-                    </div>
-                    <div className="text-2xl font-bold text-foreground">{total}</div>
-                    <div className="text-xs text-muted-foreground mt-1">{completed} completed</div>
-                    </CardContent>
-                  </Card>
-                  <Card className="py-0 shadow-sm border-border/50">
-                    <CardContent className="p-5">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">In Progress</span>
-                      <CircleDot className="w-4 h-4 text-muted-foreground" />
-                    </div>
-                    <div className="text-2xl font-bold text-foreground">{inProgress}</div>
-                    <div className="text-xs text-muted-foreground mt-1">{pending} pending</div>
-                    </CardContent>
-                  </Card>
-                  <Card className="py-0 shadow-sm border-border/50">
-                    <CardContent className="p-5">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Overdue</span>
-                      <Flame className="w-4 h-4 text-red-400" />
-                    </div>
-                    <div className={`text-2xl font-bold ${overdue > 0 ? 'text-red-400' : 'text-foreground'}`}>{overdue}</div>
-                    <div className="text-xs text-muted-foreground mt-1">{overdue > 0 ? 'needs attention' : 'on track'}</div>
-                    </CardContent>
-                  </Card>
-                </div>
-              )
-            })()}
+              const persistedInsights = ((data as unknown as { insights?: Array<{ id: string; title?: string; content?: string; tags?: string[]; created_at?: string }> | undefined })?.insights) ?? []
+              const hasGeneratedInsight = Boolean(aiAnalysis)
+              const hasPersistedInsights = persistedInsights.length > 0
+              const hasAnyInsights = hasGeneratedInsight || hasPersistedInsights
 
-            {/* AI-Powered Analysis (Gemini) */}
-            <Card className="py-0 shadow-sm border-border/50">
-            <CardContent className="p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-muted-foreground" /> AI Analysis
-                    <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full font-medium">Gemini</span>
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-1">Deep analysis of your project powered by Google Gemini AI</p>
-                </div>
-                <Button
-                  disabled={aiAnalyzing || aiRetryCountdown > 0}
-                  onClick={async () => {
-                    if (!data || !token) return
-                    setAiAnalyzing(true)
-                    try {
-                      const res = await fetch(`/api/workspaces/${workspaceId}/ai-analyze`, {
-                        method: 'POST',
-                        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          messages: realtimeMessages.slice(0, 50).map((m) => ({ content: m.content, author: m.author_username, intent: m.intent, sent_at: m.sent_at })),
-                          todos: todos.map((t) => ({ title: t.title, status: t.status, priority: t.priority, deadline: t.deadline })),
-                          healthScore: data.overview.healthScore,
-                          openPRs: data.pullRequests?.filter((p) => p.state === 'open').length || 0,
-                          openIssues: data.issues?.filter((i) => i.state === 'open').length || 0,
-                          totalCommits: data.overview.totalCommits,
-                          teamSize: data.teamStats?.length || data.members?.length || 1,
-                          busFactor: data.codebaseBusFactor,
-                          recentCommitTypes: data.recentCommits?.slice(0, 30).map((c) => c.commit_type) || [],
-                        }),
-                      })
-                      if (!res.ok) {
-                        const err = await res.json().catch(() => ({}))
-                        if (res.status === 429 && err.retryAfterMs) {
-                          const secs = Math.ceil(err.retryAfterMs / 1000)
-                          setAiRetryCountdown(secs)
-                          const interval = setInterval(() => {
-                            setAiRetryCountdown((prev) => {
-                              if (prev <= 1) { clearInterval(interval); return 0 }
-                              return prev - 1
-                            })
-                          }, 1000)
-                        }
-                        throw new Error(err.error || 'Analysis failed')
-                      }
-                      const result = await res.json()
-                      setAiAnalysis(result.analysis)
-                    } catch (e: unknown) {
-                      const msg = e instanceof Error ? e.message : 'Failed to run AI analysis'
-                      toast.error(msg)
-                    } finally {
-                      setAiAnalyzing(false)
-                    }
-                  }}
-                  className="gap-2"
-                >
-                  {aiAnalyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                  {aiAnalyzing ? 'Analyzing...' : aiRetryCountdown > 0 ? `Retry in ${aiRetryCountdown}s` : 'Generate Analysis'}
-                </Button>
+              return (
+                <>
+            
+            {/* Header */}
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+              <div>
+                <h2 className="text-[28px] font-display font-bold text-slate-900 tracking-tight">AI Insights</h2>
+                <p className="text-[13px] text-slate-500 mt-1 font-medium">Actionable intelligence for your codebase</p>
               </div>
+              <Button onClick={async () => {
+                  if (loadingInsights || !token) return
+                  setLoadingInsights(true)
+                  try {
+                    const res = await fetch(`/api/workspaces/${workspaceId}/insights/generate`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+                    const body = await res.json().catch(() => ({}))
+                    if (res.ok && body.insight) {
+                      setAiAnalysis(body.insight)
+                      toast.success('Insights generated successfully')
+                    } else {
+                      toast.error(body.error || 'Failed to generate insights')
+                    }
+                  } catch {
+                    toast.error('Failed to generate insights')
+                  }
+                  finally { setLoadingInsights(false) }
+                }} 
+                disabled={loadingInsights}
+                className="rounded-full bg-slate-900 hover:bg-slate-800 text-white shadow-[0_8px_16px_rgba(15,23,42,0.2)] px-6 h-11 font-bold text-[13px]">
+                {loadingInsights ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Brain className="size-4 mr-2" />}
+                Generate New Insights
+              </Button>
+            </div>
 
-              {aiAnalysis ? (
-                <div className="space-y-4">
-                  {/* Summary */}
-                  <div className="p-3 rounded-lg bg-muted/50 border border-border">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Summary</p>
-                    <p className="text-xs text-foreground leading-relaxed">{aiAnalysis.summary}</p>
+            {/* AI Task Creator + Task List */}
+            <Card className="border-0 shadow-[0_8px_30px_rgba(0,0,0,0.04)] rounded-[2rem] overflow-hidden bg-white mb-6">
+              <CardContent className="p-6 space-y-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-[16px] font-bold text-slate-900 tracking-tight flex items-center gap-2"><ListTodo className="size-4" /> AI Task Creator</h3>
+                    <p className="text-[12px] text-slate-500 mt-1">Generate a practical task backlog from your project description.</p>
                   </div>
-
-                  {/* Risks */}
-                  {aiAnalysis.risks.length > 0 && (
-                    <div>
-                      <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wide mb-2 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Risks Identified</p>
-                      <div className="space-y-1.5">
-                        {aiAnalysis.risks.map((risk, i) => (
-                          <div key={i} className="flex items-start gap-2 p-2 rounded bg-red-500/5 border border-red-500/15">
-                            <span className="text-red-400 text-xs mt-0.5">•</span>
-                            <p className="text-xs text-foreground">{risk}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Suggestions */}
-                  {aiAnalysis.suggestions.length > 0 && (
-                    <div>
-                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1"><Zap className="w-3 h-3" /> Suggestions</p>
-                      <div className="space-y-1.5">
-                        {aiAnalysis.suggestions.map((s, i) => (
-                          <div key={i} className="flex items-start gap-2 p-2 rounded bg-muted/30 border border-border">
-                            <span className="text-muted-foreground text-xs mt-0.5">•</span>
-                            <p className="text-xs text-foreground">{s}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Team Dynamics */}
-                  {aiAnalysis.teamDynamics && (
-                    <div className="p-3 rounded-lg bg-muted/50 border border-border">
-                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1 flex items-center gap-1"><Users className="w-3 h-3" /> Team Dynamics</p>
-                      <p className="text-xs text-foreground leading-relaxed">{aiAnalysis.teamDynamics}</p>
-                    </div>
-                  )}
-
-                  {/* Next Steps */}
-                  {aiAnalysis.nextSteps.length > 0 && (
-                    <div>
-                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1"><Target className="w-3 h-3" /> Recommended Next Steps</p>
-                      <div className="space-y-1.5">
-                        {aiAnalysis.nextSteps.map((step, i) => (
-                          <div key={i} className="flex items-start gap-2 p-2 rounded bg-muted/30 border border-border">
-                            <span className="text-muted-foreground text-xs font-bold mt-0.5">{i + 1}.</span>
-                            <p className="text-xs text-foreground">{step}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <Button variant="outline" onClick={() => setShowAddTodo((v) => !v)} className="rounded-xl h-9 text-xs font-semibold">
+                    <Plus className="size-3.5 mr-1" /> {showAddTodo ? 'Close Manual Task' : 'Add Task Manually'}
+                  </Button>
                 </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-6 text-center">
-                  <Sparkles className="w-8 h-8 text-muted-foreground/30 mb-2" />
-                  <p className="text-xs text-muted-foreground">Click &quot;Generate Analysis&quot; to get AI-powered insights about your project&apos;s health, risks, and recommendations.</p>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  <textarea
+                    value={aiProjectDesc}
+                    onChange={(e) => setAiProjectDesc(e.target.value)}
+                    placeholder="Describe your current project goals, deliverables, and constraints..."
+                    className="lg:col-span-2 min-h-[88px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                  />
+                  <div className="flex lg:flex-col gap-2">
+                    <Button onClick={generateAiTasks} disabled={aiGenerating || !aiProjectDesc.trim()} className="rounded-xl h-10 text-xs font-semibold">
+                      {aiGenerating ? <Loader2 className="size-3.5 mr-1 animate-spin" /> : <Sparkles className="size-3.5 mr-1" />} Generate Tasks
+                    </Button>
+                    <Button variant="outline" onClick={() => fetchTodos()} disabled={todosLoading} className="rounded-xl h-10 text-xs font-semibold">
+                      {todosLoading ? <Loader2 className="size-3.5 mr-1 animate-spin" /> : <RefreshCw className="size-3.5 mr-1" />} Refresh Tasks
+                    </Button>
+                  </div>
                 </div>
-              )}
-            </CardContent>
-            </Card>
 
-            {/* Smart Recommendations */}
-            {data && (() => {
-              const recommendations: Array<{ type: 'warning' | 'success' | 'info' | 'danger'; title: string; detail: string }> = []
-
-              // Overdue tasks
-              const overdueTodos = todos.filter((t) => t.deadline && new Date(t.deadline) < new Date() && t.status !== 'completed')
-              if (overdueTodos.length > 0) recommendations.push({ type: 'danger', title: `${overdueTodos.length} overdue task${overdueTodos.length > 1 ? 's' : ''}`, detail: `"${overdueTodos[0].title}"${overdueTodos.length > 1 ? ` and ${overdueTodos.length - 1} more` : ''} — consider re-prioritizing or updating deadlines.` })
-
-              // Stale PRs
-              const stalePRs = data.pullRequests?.filter((p) => p.state === 'open' && (Date.now() - new Date(p.opened_at).getTime()) > 3 * 24 * 3600 * 1000).length || 0
-              if (stalePRs > 0) recommendations.push({ type: 'warning', title: `${stalePRs} stale pull request${stalePRs > 1 ? 's' : ''}`, detail: 'PRs open for 3+ days slow down velocity. Review or close them to keep the pipeline moving.' })
-
-              // Health score low
-              if (data.overview.healthScore < 50) recommendations.push({ type: 'danger', title: 'Health score is critical', detail: `At ${data.overview.healthScore}/100 — focus on resolving open issues and merging PRs to improve.` })
-              else if (data.overview.healthScore < 75) recommendations.push({ type: 'warning', title: 'Health score needs attention', detail: `At ${data.overview.healthScore}/100 — good progress but room for improvement.` })
-              else recommendations.push({ type: 'success', title: 'Project health is good', detail: `Score: ${data.overview.healthScore}/100 — keep up the momentum!` })
-
-              // Blockers from messages
-              const blockerMsgs = realtimeMessages.filter((m) => m.intent === 'blocker')
-              if (blockerMsgs.length > 0) recommendations.push({ type: 'danger', title: `${blockerMsgs.length} blocker${blockerMsgs.length > 1 ? 's' : ''} reported`, detail: `Latest: "${blockerMsgs[0].content.slice(0, 80)}${blockerMsgs[0].content.length > 80 ? '...' : ''}" — by ${blockerMsgs[0].author_username}` })
-
-              // Bus factor risk
-              if (data.codebaseBusFactor !== undefined && data.codebaseBusFactor <= 1) recommendations.push({ type: 'warning', title: 'Bus factor risk', detail: 'Only 1 person knows critical parts of the codebase. Encourage pair programming or code reviews.' })
-
-              // High WIP
-              if (data.overview.totalWIP > 5) recommendations.push({ type: 'warning', title: 'High work-in-progress', detail: `${data.overview.totalWIP} items in WIP — consider finishing existing work before starting new tasks.` })
-
-              // No tasks yet
-              if (todos.length === 0) recommendations.push({ type: 'info', title: 'No tasks defined yet', detail: 'Add tasks below to track your project milestones and see completion progress.' })
-
-              // All tasks done
-              const allDone = todos.length > 0 && todos.every((t) => t.status === 'completed')
-              if (allDone) recommendations.push({ type: 'success', title: 'All tasks completed!', detail: 'Great job! Consider adding new milestones for the next phase.' })
-
-              // Open issues vs. team size
-              const teamSize = data.teamStats?.length || data.members?.length || 1
-              const openIssues = data.issues?.filter((i) => i.state === 'open').length || 0
-              if (openIssues > teamSize * 3) recommendations.push({ type: 'warning', title: 'Issue backlog growing', detail: `${openIssues} open issues for a team of ${teamSize} — consider triaging and closing outdated ones.` })
-
-              const recColors = { danger: 'border-red-500/30 bg-red-500/5', warning: 'border-yellow-500/30 bg-yellow-500/5', success: 'border-emerald-500/30 bg-emerald-500/5', info: 'border-blue-500/30 bg-blue-500/5' }
-              const recIcons = { danger: <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />, warning: <AlertTriangle className="w-4 h-4 text-yellow-400 shrink-0" />, success: <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />, info: <Info className="w-4 h-4 text-blue-400 shrink-0" /> }
-
-              return (
-                <Card className="py-0 shadow-sm border-border/50">
-                <CardContent className="p-5 space-y-3">
-                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <Brain className="w-4 h-4 text-muted-foreground" /> Smart Recommendations
-                  </h3>
-                  <p className="text-xs text-muted-foreground">AI-generated insights based on your project data, tasks, and team activity</p>
-                  <div className="space-y-2">
-                    {recommendations.map((r, i) => (
-                      <div key={i} className={`flex items-start gap-3 p-3 rounded-lg border ${recColors[r.type]}`}>
-                        {recIcons[r.type]}
-                        <div>
-                          <p className="text-xs font-semibold text-foreground">{r.title}</p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{r.detail}</p>
-                        </div>
-                      </div>
-                    ))}
+                {showAddTodo && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                    <Input value={newTodoTitle} onChange={(e) => setNewTodoTitle(e.target.value)} placeholder="Task title" className="md:col-span-2 bg-white" />
+                    <Input value={newTodoDesc} onChange={(e) => setNewTodoDesc(e.target.value)} placeholder="Short description" className="md:col-span-2 bg-white" />
+                    <select value={newTodoPriority} onChange={(e) => setNewTodoPriority(e.target.value as 'low' | 'medium' | 'high' | 'critical')} className="h-10 px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-800">
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="critical">Critical</option>
+                    </select>
+                    <Input type="date" value={newTodoDeadline} onChange={(e) => setNewTodoDeadline(e.target.value)} className="bg-white" />
+                    <div className="md:col-span-2 flex justify-end">
+                      <Button onClick={addTodo} disabled={addingTodo || !newTodoTitle.trim()} className="rounded-lg h-9 text-xs font-semibold">
+                        {addingTodo ? <Loader2 className="size-3.5 mr-1 animate-spin" /> : <Plus className="size-3.5 mr-1" />} Create Task
+                      </Button>
+                    </div>
                   </div>
-                </CardContent>
-                </Card>
-              )
-            })()}
+                )}
 
-            {/* Blockers & Action Items */}
-            <Card className="py-0 shadow-sm border-border/50">
-            <CardContent className="p-5 space-y-3">
-              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Flame className="w-4 h-4 text-red-400" /> Blockers & Action Items
-              </h3>
-              <p className="text-xs text-muted-foreground">Auto-detected from team messages — blockers, task claims, and progress updates</p>
-              {(() => {
-                const blockers = realtimeMessages.filter((m) => m.intent === 'blocker')
-                const taskClaims = realtimeMessages.filter((m) => m.intent === 'task_claim')
-                const progressUpdates = realtimeMessages.filter((m) => m.intent === 'progress_update')
-                if (blockers.length === 0 && taskClaims.length === 0 && progressUpdates.length === 0) {
-                  return <p className="text-xs text-muted-foreground italic">No blockers or action items detected yet. Messages with phrases like &quot;stuck on&quot;, &quot;I&apos;ll handle&quot;, or &quot;just pushed&quot; are auto-classified.</p>
-                }
-                return (
-                  <div className="space-y-4">
-                    {blockers.length > 0 && (
-                      <div>
-                        <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wide mb-1.5">Blockers ({blockers.length})</p>
-                        <div className="space-y-1.5">
-                          {blockers.slice(0, 5).map((m) => (
-                            <div key={m.id} className="flex items-start gap-2 p-2 rounded bg-red-500/5 border border-red-500/15">
-                              <AlertCircle className="w-3 h-3 text-red-400 mt-0.5 shrink-0" />
-                              <div>
-                                <p className="text-xs text-foreground">{m.content}</p>
-                                <p className="text-[10px] text-muted-foreground mt-0.5">— {m.author_username}, {formatDistanceToNow(new Date(m.sent_at), { addSuffix: true })}</p>
-                              </div>
+                <div className="rounded-xl border border-slate-100 bg-white overflow-hidden">
+                  <div className="px-3 py-2.5 border-b border-slate-100 flex items-center justify-between">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Tasks ({todos.length})</p>
+                    <p className="text-[11px] text-slate-400">Pending {(todos.filter((t) => t.status !== 'completed').length)}</p>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
+                    {todos.length === 0 ? (
+                      <div className="px-4 py-6 text-center text-[12px] text-slate-500">No tasks yet. Use AI Task Creator to generate your backlog.</div>
+                    ) : (
+                      todos.map((todo) => (
+                        <div key={todo.id} className="px-3 py-2.5 flex items-start gap-3">
+                          <button
+                            onClick={() => updateTodoStatus(todo.id, todo.status === 'completed' ? 'pending' : 'completed')}
+                            className={`mt-0.5 size-4 rounded-full border ${todo.status === 'completed' ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 bg-white'}`}
+                            title={todo.status === 'completed' ? 'Mark as pending' : 'Mark as completed'}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-[13px] font-semibold ${todo.status === 'completed' ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{todo.title}</p>
+                            {todo.description && <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{todo.description}</p>}
+                            <div className="flex items-center gap-2 mt-1.5">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                todo.priority === 'critical' ? 'bg-red-100 text-red-700' :
+                                todo.priority === 'high' ? 'bg-orange-100 text-orange-700' :
+                                todo.priority === 'medium' ? 'bg-blue-100 text-blue-700' :
+                                'bg-slate-100 text-slate-700'
+                              }`}>{todo.priority}</span>
+                              <span className="text-[10px] text-slate-500">{todo.status}</span>
+                              {todo.deadline && <span className="text-[10px] text-slate-500">Due {new Date(todo.deadline).toLocaleDateString()}</span>}
                             </div>
-                          ))}
+                          </div>
+                          <button onClick={() => removeTodo(todo.id)} className="p-1.5 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50" title="Delete task">
+                            <Trash2 className="size-3.5" />
+                          </button>
                         </div>
-                      </div>
-                    )}
-                    {taskClaims.length > 0 && (
-                      <div>
-                        <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-wide mb-1.5">Task Claims ({taskClaims.length})</p>
-                        <div className="space-y-1.5">
-                          {taskClaims.slice(0, 5).map((m) => (
-                            <div key={m.id} className="flex items-start gap-2 p-2 rounded bg-blue-500/5 border border-blue-500/15">
-                              <Target className="w-3 h-3 text-blue-400 mt-0.5 shrink-0" />
-                              <div>
-                                <p className="text-xs text-foreground">{m.content}</p>
-                                <p className="text-[10px] text-muted-foreground mt-0.5">— {m.author_username}, {formatDistanceToNow(new Date(m.sent_at), { addSuffix: true })}</p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {progressUpdates.length > 0 && (
-                      <div>
-                        <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wide mb-1.5">Progress Updates ({progressUpdates.length})</p>
-                        <div className="space-y-1.5">
-                          {progressUpdates.slice(0, 5).map((m) => (
-                            <div key={m.id} className="flex items-start gap-2 p-2 rounded bg-emerald-500/5 border border-emerald-500/15">
-                              <CheckCircle className="w-3 h-3 text-emerald-400 mt-0.5 shrink-0" />
-                              <div>
-                                <p className="text-xs text-foreground">{m.content}</p>
-                                <p className="text-[10px] text-muted-foreground mt-0.5">— {m.author_username}, {formatDistanceToNow(new Date(m.sent_at), { addSuffix: true })}</p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      ))
                     )}
                   </div>
-                )
-              })()}
-            </CardContent>
-            </Card>
-
-            {/* Team Workload Distribution */}
-            {data?.teamStats && data.teamStats.length > 0 && (
-              <Card className="py-0 shadow-sm border-border/50">
-              <CardContent className="p-5 space-y-3">
-                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <Users className="w-4 h-4 text-muted-foreground" /> Team Workload
-                </h3>
-                <p className="text-xs text-muted-foreground">Contribution distribution across team members</p>
-                <div className="space-y-2">
-                  {data.teamStats.slice(0, 8).map((member) => {
-                    const maxCommits = Math.max(...data.teamStats!.map((m) => m.commits), 1)
-                    const pct = Math.round((member.commits / maxCommits) * 100)
-                    return (
-                      <div key={member.username} className="flex items-center gap-3">
-                        <div className="flex items-center gap-2 w-32 shrink-0">
-                          {member.avatar_url ? (
-                            <img src={member.avatar_url} alt="" className="w-5 h-5 rounded-full" />
-                          ) : (
-                            <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[8px] font-bold text-primary">{member.username[0].toUpperCase()}</div>
-                          )}
-                          <span className="text-xs text-foreground truncate">{member.username}</span>
-                        </div>
-                        <div className="flex-1 bg-muted/30 rounded-full h-2 overflow-hidden">
-                          <div className="h-full rounded-full bg-foreground/40 transition-all" style={{ width: `${pct}%` }} />
-                        </div>
-                        <span className="text-[10px] text-muted-foreground w-16 text-right">{member.commits} commits</span>
-                      </div>
-                    )
-                  })}
                 </div>
               </CardContent>
+            </Card>
+
+            {/* Content Area */}
+            {!hasAnyInsights ? (
+              <Card className="border-0 shadow-[0_8px_30px_rgba(0,0,0,0.04)] rounded-[2rem] overflow-hidden bg-white">
+                <CardContent className="py-24 flex flex-col items-center justify-center text-center">
+                  <div className="size-16 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center mb-4">
+                    <Sparkles className="size-8 text-slate-300" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900">No Insights Generated Yet</h3>
+                  <p className="text-[13px] text-slate-500 mt-2 max-w-sm">
+                    Run an analysis on your repository to uncover patterns, bus factors, and structural improvements.
+                  </p>
+                </CardContent>
               </Card>
-            )}
-
-            {/* Todo List */}
-            <Card className="py-0 shadow-sm border-border/50">
-            <CardContent className="p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <Target className="w-4 h-4 text-muted-foreground" /> Tasks & Deadlines
-                </h3>
-                <Button size="sm" onClick={() => setShowAddTodo(!showAddTodo)} className="gap-1.5">
-                  <Plus className="w-3 h-3" /> Add Task
-                </Button>
-              </div>
-
-              {/* AI Todo Generator */}
-              <div className="bg-muted/30 border border-border rounded-lg p-4 space-y-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <Sparkles className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-xs font-semibold text-foreground">AI Task Generator</span>
-                </div>
-                <p className="text-[10px] text-muted-foreground">Describe your project and AI will generate a task breakdown for you.</p>
-                <textarea
-                  value={aiProjectDesc}
-                  onChange={(e) => setAiProjectDesc(e.target.value)}
-                  placeholder="e.g. Build a full-stack e-commerce app with Next.js, Stripe payments, user auth, product catalog, shopping cart, and admin dashboard..."
-                  className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-                  rows={3}
-                  maxLength={1000}
-                />
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={async () => {
-                      if (!aiProjectDesc.trim() || aiGenerating || !token) return
-                      setAiGenerating(true)
-                      try {
-                        const res = await fetch(`/api/workspaces/${workspaceId}/todos/generate`, {
-                          method: 'POST',
-                          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            projectDescription: aiProjectDesc.trim(),
-                            existingTodos: todos.map((t) => t.title),
-                          }),
-                        })
-                        const d = await res.json()
-                        if (res.ok) {
-                          setTodos((prev) => [...(d.todos ?? []), ...prev])
-                          toast.success(`Generated ${d.count} tasks`)
-                          setAiProjectDesc('')
-                        } else {
-                          toast.error(d.error || 'Failed to generate tasks')
-                        }
-                      } catch { toast.error('AI task generation failed') }
-                      finally { setAiGenerating(false) }
-                    }}
-                    disabled={aiGenerating || !aiProjectDesc.trim()}
-                    className="px-4 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5"
-                  >
-                    {aiGenerating ? (
-                      <><div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> Generating...</>
-                    ) : (
-                      <><Sparkles className="w-3 h-3" /> Generate Tasks</>
-                    )}
-                  </button>
-                  <span className="text-[10px] text-muted-foreground">{aiProjectDesc.length}/1000</span>
-                </div>
-              </div>
-
-              {/* Add Todo Form */}
-              {showAddTodo && (
-                <div className="bg-muted/50 border border-border rounded-lg p-4 space-y-3">
-                  <input
-                    value={newTodoTitle}
-                    onChange={(e) => setNewTodoTitle(e.target.value)}
-                    placeholder="Task title *"
-                    className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                    maxLength={200}
-                  />
-                  <textarea
-                    value={newTodoDesc}
-                    onChange={(e) => setNewTodoDesc(e.target.value)}
-                    placeholder="Description (optional)"
-                    className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-                    rows={2}
-                  />
-                  <div className="flex flex-wrap gap-3">
-                    <div className="flex-1 min-w-[120px]">
-                      <label className="text-[10px] text-muted-foreground uppercase tracking-wide">Priority</label>
-                      <select
-                        value={newTodoPriority}
-                        onChange={(e) => setNewTodoPriority(e.target.value as 'low' | 'medium' | 'high' | 'critical')}
-                        className="w-full mt-1 px-3 py-1.5 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                      >
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                        <option value="critical">Critical</option>
-                      </select>
-                    </div>
-                    <div className="flex-1 min-w-[160px]">
-                      <label className="text-[10px] text-muted-foreground uppercase tracking-wide">Deadline</label>
-                      <input
-                        type="datetime-local"
-                        value={newTodoDeadline}
-                        onChange={(e) => setNewTodoDeadline(e.target.value)}
-                        className="w-full mt-1 px-3 py-1.5 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={async () => {
-                        if (!newTodoTitle.trim() || addingTodo) return
-                        setAddingTodo(true)
-                        try {
-                          const res = await fetch(`/api/workspaces/${workspaceId}/todos`, {
-                            method: 'POST',
-                            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              title: newTodoTitle.trim(),
-                              description: newTodoDesc.trim() || null,
-                              priority: newTodoPriority,
-                              deadline: newTodoDeadline ? new Date(newTodoDeadline).toISOString() : null,
-                            }),
-                          })
-                          if (res.ok) {
-                            const { todo } = await res.json()
-                            setTodos((prev) => [todo, ...prev])
-                            setNewTodoTitle('')
-                            setNewTodoDesc('')
-                            setNewTodoPriority('medium')
-                            setNewTodoDeadline('')
-                            setShowAddTodo(false)
-                            toast.success('Task added')
-                          } else {
-                            const d = await res.json()
-                            toast.error(d.error || 'Failed to add task')
-                          }
-                        } catch { toast.error('Failed to add task') }
-                        finally { setAddingTodo(false) }
-                      }}
-                      disabled={addingTodo || !newTodoTitle.trim()}
-                      className="px-4 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5"
-                    >
-                      {addingTodo ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Save className="w-3 h-3" />}
-                      Create
-                    </button>
-                    <button onClick={() => setShowAddTodo(false)} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Fetch todos on mount */}
-              {todosLoading ? (
-                <div className="flex justify-center py-8"><div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>
-              ) : todos.length === 0 ? (
-                <div className="text-center py-8">
-                  <ListTodo className="w-8 h-8 text-muted-foreground/50 mx-auto mb-2" />
-                  <p className="text-xs text-muted-foreground">No tasks yet. Add your first task to track project progress!</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {todos.map((todo) => {
-                    const isOverdue = todo.deadline && new Date(todo.deadline) < new Date() && todo.status !== 'completed'
-                    const priorityColors: Record<string, string> = {
-                      low: 'text-zinc-400',
-                      medium: 'text-blue-400',
-                      high: 'text-orange-400',
-                      critical: 'text-red-400',
-                    }
-                    const statusIcons: Record<string, React.ReactNode> = {
-                      pending: <div className="w-4 h-4 rounded-full border-2 border-muted-foreground/40" />,
-                      'in-progress': <CircleDot className="w-4 h-4 text-blue-400" />,
-                      completed: <CheckCircle className="w-4 h-4 text-emerald-400" />,
-                    }
-                    return (
-                      <div key={todo.id} className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
-                        todo.status === 'completed' ? 'bg-emerald-500/5 border-emerald-500/20 opacity-70' :
-                        isOverdue ? 'bg-red-500/5 border-red-500/20' : 'bg-muted/30 border-border hover:bg-muted/50'
-                      }`}>
-                        <button
-                          onClick={async () => {
-                            const nextStatus = todo.status === 'pending' ? 'in-progress' : todo.status === 'in-progress' ? 'completed' : 'pending'
-                            try {
-                              const res = await fetch(`/api/workspaces/${workspaceId}/todos`, {
-                                method: 'PATCH',
-                                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ id: todo.id, status: nextStatus }),
-                              })
-                              if (res.ok) {
-                                const { todo: updated } = await res.json()
-                                setTodos((prev) => prev.map((t) => t.id === updated.id ? updated : t))
-                                if (nextStatus === 'completed') toast.success('Task completed!')
-                              }
-                            } catch { toast.error('Failed to update task') }
-                          }}
-                          className="mt-0.5 shrink-0 hover:scale-110 transition-transform"
-                          title={`Click to mark as ${todo.status === 'pending' ? 'in-progress' : todo.status === 'in-progress' ? 'completed' : 'pending'}`}
-                        >
-                          {statusIcons[todo.status]}
-                        </button>
+            ) : (
+              <div className="space-y-6">
+                {aiAnalysis && (
+                  <Card className="border-0 shadow-[0_8px_30px_rgba(0,0,0,0.04)] rounded-[2rem] overflow-hidden bg-white">
+                    <CardContent className="p-8 space-y-5">
+                      <div className="flex items-start gap-5">
+                        <div className="shrink-0 p-3 bg-indigo-50 rounded-2xl text-indigo-500 shadow-inner">
+                          <Brain className="size-6" />
+                        </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className={`text-xs font-medium ${todo.status === 'completed' ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{todo.title}</p>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <span className={`text-[10px] font-medium ${priorityColors[todo.priority]}`}>{todo.priority}</span>
-                              <button
-                                onClick={async () => {
-                                  try {
-                                    const res = await fetch(`/api/workspaces/${workspaceId}/todos`, {
-                                      method: 'DELETE',
-                                      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ id: todo.id }),
-                                    })
-                                    if (res.ok) {
-                                      setTodos((prev) => prev.filter((t) => t.id !== todo.id))
-                                      toast.success('Task deleted')
-                                    }
-                                  } catch { toast.error('Failed to delete task') }
-                                }}
-                                className="p-0.5 text-muted-foreground hover:text-red-400 transition-colors"
-                                title="Delete task"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </div>
-                          {todo.description && <p className="text-[10px] text-muted-foreground mt-0.5">{todo.description}</p>}
-                          <div className="flex items-center gap-3 mt-1.5">
-                            {todo.deadline && (
-                              <span className={`text-[10px] flex items-center gap-1 ${isOverdue ? 'text-red-400 font-medium' : 'text-muted-foreground'}`}>
-                                <Calendar className="w-2.5 h-2.5" />
-                                {isOverdue ? 'Overdue: ' : ''}{new Date(todo.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                            )}
-                            <span className="text-[10px] text-muted-foreground">
-                              {formatDistanceToNow(new Date(todo.created_at), { addSuffix: true })}
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-[16px] font-bold text-slate-900 tracking-tight">Latest AI Workspace Analysis</h4>
+                            <span className="text-[11px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-lg">
+                              {new Date().toLocaleDateString()}
                             </span>
                           </div>
+                          <p className="text-[14px] leading-relaxed text-slate-600">{aiAnalysis.summary}</p>
                         </div>
                       </div>
-                    )
-                  })}
-                </div>
-              )}
-            </CardContent>
-            </Card>
 
-            {/* Commit Activity Insights */}
-            {data && (
-              <Card className="py-0 shadow-sm border-border/50">
-              <CardContent className="p-5 space-y-3">
-                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <BarChart2 className="w-4 h-4 text-muted-foreground" /> Commit Type Breakdown
-                </h3>
-                <p className="text-xs text-muted-foreground">Distribution of commit types detected by AI classification</p>
-                {(() => {
-                  const typeCounts: Record<string, number> = {}
-                  data.recentCommits?.forEach((c) => {
-                    const t = c.commit_type || 'other'
-                    typeCounts[t] = (typeCounts[t] || 0) + 1
-                  })
-                  const entries = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])
-                  const total = data.recentCommits?.length || 1
-                  if (entries.length === 0) return <p className="text-xs text-muted-foreground italic">No commits analyzed yet.</p>
-                  return (
-                    <div className="space-y-2">
-                      {entries.map(([type, count]) => (
-                        <div key={type} className="flex items-center gap-3">
-                          <span className={`text-[10px] font-medium uppercase w-16 shrink-0 px-1.5 py-0.5 rounded text-center ${TYPE_COLORS[type] || 'bg-zinc-500/20 text-zinc-400'}`}>{type}</span>
-                          <div className="flex-1 bg-muted/30 rounded-full h-2 overflow-hidden">
-                            <div className="h-full rounded-full bg-primary/60 transition-all" style={{ width: `${(count / total) * 100}%` }} />
-                          </div>
-                          <span className="text-[10px] text-muted-foreground w-8 text-right">{count}</span>
+                      {aiAnalysis.risks.length > 0 && (
+                        <div>
+                          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Risks</p>
+                          <ul className="space-y-1">
+                            {aiAnalysis.risks.map((risk, idx) => (
+                              <li key={idx} className="text-[13px] text-slate-600 flex items-start gap-2"><span className="text-red-400 mt-0.5">•</span>{risk}</li>
+                            ))}
+                          </ul>
                         </div>
-                      ))}
-                    </div>
-                  )
-                })()}
-              </CardContent>
-              </Card>
-            )}
+                      )}
 
-            {/* Weekly Velocity */}
-            {data && data.recentCommits && data.recentCommits.length > 0 && (
-              <Card className="py-0 shadow-sm border-border/50">
-              <CardContent className="p-5 space-y-3">
-                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-muted-foreground" /> Development Velocity
-                </h3>
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total Commits</p>
-                    <p className="text-lg font-bold text-foreground">{data.recentCommits.length}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Open PRs</p>
-                    <p className="text-lg font-bold text-foreground">{data.pullRequests?.filter((p: { state: string }) => p.state === 'open').length || 0}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Open Issues</p>
-                    <p className="text-lg font-bold text-foreground">{data.issues?.filter((i: { state: string }) => i.state === 'open').length || 0}</p>
-                  </div>
-                </div>
-              </CardContent>
-              </Card>
+                      {aiAnalysis.suggestions.length > 0 && (
+                        <div>
+                          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Suggestions</p>
+                          <ul className="space-y-1">
+                            {aiAnalysis.suggestions.map((suggestion, idx) => (
+                              <li key={idx} className="text-[13px] text-slate-600 flex items-start gap-2"><span className="text-indigo-400 mt-0.5">•</span>{suggestion}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {aiAnalysis.nextSteps.length > 0 && (
+                        <div>
+                          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Next Steps</p>
+                          <ul className="space-y-1">
+                            {aiAnalysis.nextSteps.map((step, idx) => (
+                              <li key={idx} className="text-[13px] text-slate-600 flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span>{step}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {aiAnalysis.teamDynamics && (
+                        <div className="pt-4 border-t border-slate-100">
+                          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Team Dynamics</p>
+                          <p className="text-[13px] text-slate-600">{aiAnalysis.teamDynamics}</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {persistedInsights.map((insight) => (
+                  <Card key={insight.id} className="border-0 shadow-[0_8px_30px_rgba(0,0,0,0.04)] rounded-[2rem] overflow-hidden bg-white">
+                    <CardContent className="p-8">
+                      <div className="flex items-start gap-5">
+                        <div className="shrink-0 p-3 bg-indigo-50 rounded-2xl text-indigo-500 shadow-inner">
+                          <Brain className="size-6" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-[16px] font-bold text-slate-900 tracking-tight">{insight.title || 'Codebase Insight'}</h4>
+                            <span className="text-[11px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-lg">
+                              {insight.created_at ? new Date(insight.created_at).toLocaleDateString() : '—'}
+                            </span>
+                          </div>
+                          
+                          <p className="text-[14px] leading-relaxed text-slate-600 mb-6">
+                            {insight.content ?? 'No content available'}
+                          </p>
+
+                          <div className="flex flex-wrap gap-2 pt-4 border-t border-slate-100">
+                             {(insight.tags || ['refactor', 'architecture']).map((tag, idx) => (
+                               <span key={idx} className="px-3 py-1.5 bg-slate-50 text-slate-600 text-[11px] font-bold uppercase tracking-wider rounded-xl border border-slate-100">
+                                 {tag}
+                               </span>
+                             ))}
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             )}
+                </>
+              )
+            })()}
           </div>
         )}
 
-        {/* SETTINGS TAB */}
         {tab === 'settings' && wsInfo && (
           <div className="max-w-2xl mx-auto space-y-6">
             <div>
@@ -2941,18 +2923,10 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <Users className="w-4 h-4" /> Team Invitations
               </h3>
-              <Button onClick={generateInvite} disabled={inviteLoading} className="gap-2">
-                {inviteLoading && <div className="w-3 h-3 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />}
-                {inviteLoading ? 'Generating...' : 'Generate Invite Link (48h)'}
+              <p className="text-xs text-muted-foreground">Create and share a secure 48-hour invite link from one place.</p>
+              <Button onClick={() => setInviteDialogOpen(true)} className="gap-2">
+                <UserMinus className="w-3.5 h-3.5" /> Open Invite Flow
               </Button>
-              {inviteUrl && (
-                <div className="flex items-center gap-2 bg-muted rounded-lg p-3">
-                  <code className="flex-1 text-xs text-foreground break-all">{inviteUrl}</code>
-                  <button onClick={() => { navigator.clipboard.writeText(inviteUrl); toast.success('Copied!') }} className="p-1 text-muted-foreground hover:text-foreground">
-                    <Copy className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
             </CardContent>
             </Card>
 
@@ -3279,6 +3253,50 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
           </div>
         )}
       </main>
+      </div>
+
+      {/* Invite Dialog */}
+      <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-[2rem] border-0 shadow-[0_16px_48px_rgba(0,0,0,0.1)]">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-slate-900">Invite Team Members</DialogTitle>
+            <DialogDescription className="text-slate-500">
+              Generate a secure 48-hour invite link to allow members to join this workspace.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-4">
+            {!inviteUrl ? (
+              <Button onClick={generateInvite} disabled={inviteLoading} className="w-full rounded-2xl bg-slate-900 hover:bg-slate-800 text-white h-12 font-bold text-[14px]">
+                {inviteLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <UserMinus className="mr-2 h-5 w-5" />}
+                {inviteLoading ? 'Generating Link...' : 'Generate Invite Link'}
+              </Button>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                  <div className="flex-1 font-mono text-[11px] text-slate-700 break-all select-all overflow-hidden">{inviteUrl}</div>
+                  <Button onClick={copyInviteLink} variant="ghost" size="icon" className="shrink-0 text-slate-500 hover:text-slate-900 rounded-xl" title="Copy invite link">
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <Button onClick={copyInviteLink} variant="outline" className="rounded-2xl h-11 font-bold">
+                    {inviteCopied ? 'Copied' : 'Copy Link'}
+                  </Button>
+                  <Button onClick={generateInvite} disabled={inviteLoading} className="rounded-2xl bg-slate-900 hover:bg-slate-800 text-white h-11 font-bold">
+                    {inviteLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    {inviteLoading ? 'Regenerating...' : 'Regenerate Link'}
+                  </Button>
+                </div>
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                  <p className="text-[11px] text-amber-800 font-medium">This link expires in 48 hours.</p>
+                  <p className="text-[10px] text-amber-700 mt-0.5">Generating a new link invalidates the previous one.</p>
+                </div>
+                <Button onClick={() => setInviteDialogOpen(false)} variant="outline" className="w-full rounded-2xl h-11 font-bold">Done</Button>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -1,14 +1,9 @@
 import type { NextConfig } from "next";
-
-// Orchids visual-edits loader — only used in development
-let loaderPath: string | undefined;
-try {
-  loaderPath = require.resolve('orchids-visual-edits/loader.js');
-} catch {
-  // Not available in production builds
-}
+import path from 'path'
 
 const nextConfig: NextConfig = {
+  distDir: '.next-app',
+  outputFileTracingRoot: path.resolve(__dirname),
   images: {
     remotePatterns: [
       {
@@ -63,15 +58,6 @@ const nextConfig: NextConfig = {
       },
     ]
   },
-  ...(loaderPath ? {
-    turbopack: {
-      rules: {
-        "*.{jsx,tsx}": {
-          loaders: [loaderPath]
-        }
-      }
-    }
-  } : {}),
 } as NextConfig;
 
 export default nextConfig;

@@ -52,7 +52,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
       // Fetch messages from DB (stored in discord_messages table)
       const { data: liveMessages } = await db
         .from('discord_messages')
-        .select('id, channel_name, author_discord_id, author_username, content, sent_at, intent, entities')
+        .select('id, channel_name, author_discord_id, author_username, content, sent_at, intent, entities, is_blocker')
         .eq('workspace_id', workspaceId)
         .order('sent_at', { ascending: false })
         .limit(50)
@@ -62,6 +62,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
         .from('file_authorship')
         .select('file_path, author_github_username, lines_added, lines_modified, commit_count')
         .eq('workspace_id', workspaceId)
+
+      const { data: cycleMetrics } = await db
+        .from('cycle_time_metrics')
+        .select('pull_request_id, coding_time_seconds, pickup_time_seconds, review_time_seconds, deployment_time_seconds, total_cycle_time_seconds, calculated_at')
+        .eq('workspace_id', workspaceId)
+        .order('calculated_at', { ascending: false })
+        .limit(20)
+
+      const { data: healthHistory } = await db
+        .from('health_snapshots')
+        .select('score, snapshot_at')
+        .eq('workspace_id', workspaceId)
+        .order('snapshot_at', { ascending: false })
+        .limit(30)
 
       let criticalFiles: Array<{ file: string; busFactor: number; dominant_author: string | null; concentration: number; authorCount: number }> = []
 
@@ -173,6 +187,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
       const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString()
       const activePRs = live.pullRequests.filter((pr) => pr.state === 'open' && pr.updated_at > sevenDaysAgo)
 
+      // Average cycle time from persisted webhook-derived cycle metrics
+      const avgCycleTime = cycleMetrics && cycleMetrics.length > 0
+        ? Math.round(cycleMetrics.reduce((s, m) => s + (m.total_cycle_time_seconds ?? 0), 0) / cycleMetrics.length)
+        : null
+
       // ── Build per-contributor team stats (AR-VCS-002..012) ──
       const teamMap: Record<string, {
         username: string; avatar_url: string | null;
@@ -253,7 +272,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
           openPRs: live.overview.openPRs,
           openIssues: live.overview.openIssues,
           healthScore,
-          avgCycleTimeSeconds: null,
+          avgCycleTimeSeconds: avgCycleTime,
           totalWIP: activePRs.length,
           healthBreakdown: {
             commitVelocity: { score: commitVelocity, weight: 0.30, detail: `${recentCommits7d} commits in last 7d` },
@@ -305,7 +324,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
         criticalFiles,
         codebaseBusFactor,
         members: members ?? [],
-        healthHistory: [],
+        healthHistory: healthHistory ?? [],
         wipPerUser: (() => {
           const wipMap: Record<string, number> = {}
           for (const pr of activePRs) {
@@ -313,7 +332,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
           }
           return Object.entries(wipMap).map(([username, count]) => ({ username, count })).sort((a, b) => b.count - a.count)
         })(),
-        cycleTimeTrend: [],
+        cycleTimeTrend: (cycleMetrics ?? []).map((m) => ({
+          pullRequestId: m.pull_request_id,
+          codingTime: m.coding_time_seconds,
+          pickupTime: m.pickup_time_seconds,
+          reviewTime: m.review_time_seconds,
+          deploymentTime: m.deployment_time_seconds,
+          totalCycleTime: m.total_cycle_time_seconds,
+          calculatedAt: m.calculated_at,
+        })),
         messages: (liveMessages ?? []).map((m: Record<string, unknown>) => ({
           id: m.id,
           source: m.author_discord_id === 'app' ? 'app' : 'discord',
@@ -323,6 +350,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
           sent_at: m.sent_at,
           intent: m.intent,
           entities: m.entities,
+          is_blocker: m.is_blocker,
         })),
         teamStats,
         liveSource: true,
@@ -338,7 +366,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
   const [
     { count: totalCommits },
     { count: openPRs },
+    { count: closedPRs },
     { count: openIssues },
+    { count: closedIssues },
     { data: commits },
     { data: prs },
     { data: issues },
@@ -351,7 +381,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
   ] = await Promise.all([
     db.from('commits').select('*', { count: 'exact', head: true }).eq('workspace_id', workspaceId),
     db.from('pull_requests').select('*', { count: 'exact', head: true }).eq('workspace_id', workspaceId).eq('state', 'open'),
+    db.from('pull_requests').select('*', { count: 'exact', head: true }).eq('workspace_id', workspaceId).neq('state', 'open'),
     db.from('issues').select('*', { count: 'exact', head: true }).eq('workspace_id', workspaceId).eq('state', 'open'),
+    db.from('issues').select('*', { count: 'exact', head: true }).eq('workspace_id', workspaceId).neq('state', 'open'),
     db.from('commits').select('author_github_username, committed_at, commit_type, lines_added, lines_deleted').eq('workspace_id', workspaceId).order('committed_at', { ascending: false }).limit(100),
     db.from('pull_requests').select('id, github_pr_number, title, state, author_github_username, opened_at, merged_at, lines_added, lines_deleted').eq('workspace_id', workspaceId).order('opened_at', { ascending: false }).limit(20),
     db.from('issues').select('github_issue_number, title, state, assignee_github_username, opened_at').eq('workspace_id', workspaceId).order('opened_at', { ascending: false }).limit(20),
@@ -360,7 +392,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
     db.from('file_authorship').select('file_path, author_github_username, lines_added, lines_modified, commit_count').eq('workspace_id', workspaceId),
     db.from('cycle_time_metrics').select('pull_request_id, coding_time_seconds, pickup_time_seconds, review_time_seconds, deployment_time_seconds, total_cycle_time_seconds, calculated_at').eq('workspace_id', workspaceId).order('calculated_at', { ascending: false }).limit(20),
     db.from('health_snapshots').select('score, snapshot_at').eq('workspace_id', workspaceId).order('snapshot_at', { ascending: false }).limit(30),
-    db.from('discord_messages').select('id, channel_name, author_discord_id, author_username, content, sent_at, intent, entities').eq('workspace_id', workspaceId).order('sent_at', { ascending: false }).limit(50),
+    db.from('discord_messages').select('id, channel_name, author_discord_id, author_username, content, sent_at, intent, entities, is_blocker').eq('workspace_id', workspaceId).order('sent_at', { ascending: false }).limit(50),
   ])
 
   // Contributor activity
@@ -400,24 +432,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
   const recentCommits7d = (commits ?? []).filter((c) => {
     return new Date(c.committed_at) > new Date(Date.now() - 7 * 86400000)
   }).length
-  const commitScore = Math.min(100, recentCommits7d * 5)
-  const prScore = openPRs! > 10 ? 40 : openPRs! > 5 ? 70 : 100
-  const issueScore = openIssues! > 20 ? 50 : openIssues! > 10 ? 75 : 100
-  const busFactorScore = criticalFiles.length > 5 ? 40 : criticalFiles.length > 2 ? 70 : 100
-  const criticalAlerts = (alertsData ?? []).filter((a) => a.severity === 'critical').length
-  const alertPenalty = Math.min(50, criticalAlerts * 15)
-  const healthScore = Math.max(0, Math.round((commitScore + prScore + issueScore + busFactorScore) / 4 - alertPenalty))
-
-  // Save health snapshot
-  await db.from('health_snapshots').insert({
-    workspace_id: workspaceId,
-    score: healthScore,
-    commit_score: commitScore,
-    pr_score: prScore,
-    issue_score: issueScore,
-    bus_factor_score: busFactorScore,
-    alert_penalty: alertPenalty,
-  })
+  const commitVelocity = Math.min(100, Math.round((recentCommits7d / 14) * 100))
+  const totalPRs = (openPRs ?? 0) + (closedPRs ?? 0)
+  const prThroughput = totalPRs === 0
+    ? 0
+    : Math.round(((closedPRs ?? 0) / totalPRs) * 100 * (1 - Math.min(0.5, (openPRs ?? 0) / 20)))
+  const totalIssues = (openIssues ?? 0) + (closedIssues ?? 0)
+  const issueResolution = totalIssues === 0
+    ? 0
+    : Math.round((((closedIssues ?? 0) / totalIssues) * 80) + ((openIssues ?? 0) <= 5 ? 20 : (openIssues ?? 0) <= 15 ? 10 : 0))
+  const activitySpread = contributors.length >= 4 ? 100 : contributors.length >= 3 ? 80 : contributors.length >= 2 ? 60 : contributors.length >= 1 ? 30 : 0
 
   // WIP per user (open PRs per author)
   const wipMap: Record<string, number> = {}
@@ -511,6 +535,36 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
     }
   }
   const dbTeamStats = Object.values(dbTeamMap).sort((a, b) => b.commits - a.commits)
+  const contributorHealth = dbTeamStats.map((t) => {
+    const hours = t.lastActive ? Math.round(((nowDB - new Date(t.lastActive).getTime()) / 3600000) * 100) / 100 : Number.POSITIVE_INFINITY
+    return {
+      author: t.username,
+      avatar_url: t.avatar_url,
+      last_commit: t.lastActive ?? new Date(0).toISOString(),
+      hours_since_last_commit: Number.isFinite(hours) ? hours : 999999,
+      status: t.status as 'active' | 'moderate' | 'inactive',
+    }
+  })
+  const healthyContributors = contributorHealth.filter((h) => h.status === 'active' || h.status === 'moderate').length
+  const healthDiversity = contributorHealth.length === 0 ? 0 : Math.round((healthyContributors / contributorHealth.length) * 100)
+  const healthScore = Math.max(0, Math.min(100, Math.round(
+    commitVelocity * 0.30 +
+    prThroughput * 0.20 +
+    issueResolution * 0.20 +
+    activitySpread * 0.15 +
+    healthDiversity * 0.15
+  )))
+
+  // Save health snapshot using the currently computed fallback metrics.
+  await db.from('health_snapshots').insert({
+    workspace_id: workspaceId,
+    score: healthScore,
+    commit_score: commitVelocity,
+    pr_score: prThroughput,
+    issue_score: issueResolution,
+    bus_factor_score: healthDiversity,
+    alert_penalty: 0,
+  })
 
   return NextResponse.json({
     overview: {
@@ -520,8 +574,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
       healthScore,
       avgCycleTimeSeconds: avgCycleTime,
       totalWIP: Object.values(wipMap).reduce((s, c) => s + c, 0),
+      healthBreakdown: {
+        commitVelocity: { score: commitVelocity, weight: 0.30, detail: `${recentCommits7d} commits in last 7d` },
+        prThroughput: { score: prThroughput, weight: 0.20, detail: totalPRs === 0 ? 'No PRs yet' : `${closedPRs ?? 0} closed / ${totalPRs} total PRs` },
+        issueResolution: { score: issueResolution, weight: 0.20, detail: totalIssues === 0 ? 'No issues yet' : `${closedIssues ?? 0} closed / ${totalIssues} total issues` },
+        activitySpread: { score: activitySpread, weight: 0.15, detail: contributors.length === 0 ? 'No contributors yet' : `${contributors.length} contributors` },
+        healthDiversity: { score: healthDiversity, weight: 0.15, detail: contributorHealth.length === 0 ? 'No contributor data yet' : `${healthyContributors}/${contributorHealth.length} active contributors` },
+      },
     },
     contributors,
+    contributorHealth,
     recentCommits: commits?.slice(0, 20) ?? [],
     pullRequests: prs ?? [],
     issues: issues ?? [],
@@ -540,6 +602,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
       sent_at: m.sent_at,
       intent: m.intent,
       entities: m.entities,
+      is_blocker: m.is_blocker,
     })),
     teamStats: dbTeamStats,
   })

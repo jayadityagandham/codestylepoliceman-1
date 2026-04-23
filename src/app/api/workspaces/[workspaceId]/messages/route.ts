@@ -30,6 +30,7 @@ function mapMessage(m: RawMsg) {
     sent_at: m.sent_at,
     intent: m.intent,
     entities: m.entities,
+    is_blocker: m.is_blocker ?? false,
   }
 }
 

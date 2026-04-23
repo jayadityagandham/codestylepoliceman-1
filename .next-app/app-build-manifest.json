@@ -1,0 +1,80 @@
+{
+  "pages": {
+    "/layout": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/css/app/layout.css",
+      "static/chunks/app/layout.js"
+    ],
+    "/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/page.js"
+    ],
+    "/api/auth/me/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/auth/me/route.js"
+    ],
+    "/dashboard/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/dashboard/page.js"
+    ],
+    "/api/workspaces/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/workspaces/route.js"
+    ],
+    "/dashboard/[workspaceId]/loading": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/dashboard/[workspaceId]/loading.js"
+    ],
+    "/dashboard/[workspaceId]/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/dashboard/[workspaceId]/page.js"
+    ],
+    "/api/workspaces/[workspaceId]/dashboard/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/workspaces/[workspaceId]/dashboard/route.js"
+    ],
+    "/api/workspaces/[workspaceId]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/workspaces/[workspaceId]/route.js"
+    ],
+    "/api/workspaces/[workspaceId]/repo/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/workspaces/[workspaceId]/repo/route.js"
+    ],
+    "/api/workspaces/[workspaceId]/collaborators/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/workspaces/[workspaceId]/collaborators/route.js"
+    ],
+    "/api/workspaces/[workspaceId]/invite/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/workspaces/[workspaceId]/invite/route.js"
+    ],
+    "/invite/[token]/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/invite/[token]/page.js"
+    ],
+    "/api/workspaces/invite/join/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/workspaces/invite/join/route.js"
+    ],
+    "/api/workspaces/[workspaceId]/messages/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/workspaces/[workspaceId]/messages/route.js"
+    ]
+  }
+}
